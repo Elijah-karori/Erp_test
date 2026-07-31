@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -17,6 +18,11 @@ func NewUIHandler(database *db.Database, sdb *db.SQLiteDB) *UIHandler {
 	return &UIHandler{db: database, sqliteDB: sdb}
 }
 
+type UpdateRBACPayload struct {
+	RoleName    string   `json:"role_name"`
+	Permissions []string `json:"permissions"`
+}
+
 // ServeDashboard returns the gorgeous fully-functional Tailwind UI
 func (h *UIHandler) ServeDashboard(c echo.Context) error {
 	return c.HTML(http.StatusOK, htmlContent)
@@ -25,7 +31,32 @@ func (h *UIHandler) ServeDashboard(c echo.Context) error {
 // GetState returns the current in-memory DB state for UI rendering
 func (h *UIHandler) GetState(c echo.Context) error {
 	state := h.db.GetState()
+	// Add roles definition to state so UI policy manager can see active permissions
+	state["roles"] = h.db.GetRoles()
 	return c.JSON(http.StatusOK, state)
+}
+
+// UpdateRBAC handles interactive RBAC/ABAC permission toggling from UI
+func (h *UIHandler) UpdateRBAC(c echo.Context) error {
+	var payload UpdateRBACPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	h.db.UpdateRolePermissions(payload.RoleName, payload.Permissions)
+
+	tenantID := c.Request().Header.Get("Authorization-Tenant-Id")
+	userID := c.Request().Header.Get("Authorization-User-Id")
+	if tenantID == "" {
+		tenantID = "tenant_safari"
+	}
+	if userID == "" {
+		userID = "usr_safari_admin"
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "UpdateRBAC_Success", fmt.Sprintf("Role '%s' permissions updated dynamically to %v", payload.RoleName, payload.Permissions))
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Permissions updated successfully"})
 }
 
 // GetLogs returns live SQLite audit logs
@@ -104,6 +135,7 @@ const htmlContent = `
 
         <main class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="lg:col-span-8 space-y-6">
+                <!-- Protection & Active Persona Metrics banner -->
                 <div class="bg-brand-500 rounded-xl p-6 border border-brand-600 shadow-md flex items-center justify-between">
                     <div>
                         <h2 class="text-lg font-bold text-emerald-300">RBAC &amp; ABAC Dynamic Protection</h2>
@@ -114,16 +146,33 @@ const htmlContent = `
                     </div>
                 </div>
 
+                <!-- Section: Dynamic RBAC/ABAC Configurator Policy Manager -->
                 <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                    <div class="flex items-center justify-between mb-4 border-b border-brand-600 pb-3">
+                        <h3 class="font-bold text-lg flex items-center space-x-2 text-emerald-400">
+                            <i class="fa-solid fa-shield-halved"></i>
+                            <span>Interactive Policy Engine Manager (ABAC/RBAC)</span>
+                        </h3>
+                        <span class="text-xs px-2 py-0.5 bg-brand-900 text-emerald-400 font-mono rounded font-bold border border-brand-600">TenantAdmin Control Only</span>
+                    </div>
+                    <p class="text-xs text-slate-300 mb-4">Toggle dynamic role permissions in the database instantly. When updated, Go's hierarchy resolver re-calculates all backend and frontend capabilities in real time.</p>
+
+                    <div id="policyConfigGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Filled dynamically -->
+                    </div>
+                </div>
+
+                <!-- Section 1: Serialized Inventory Tracking -->
+                <div id="inventorySection" class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="font-bold text-lg flex items-center space-x-2">
                             <i class="fa-solid fa-boxes-stacked text-emerald-400"></i>
                             <span>Serialized Inventory Asset Tracking</span>
                         </h3>
-                        <span class="text-xs text-slate-400 uppercase tracking-widest">STRICT SERIAL CONTROL</span>
+                        <span id="inventoryHeaderBadge" class="text-xs text-slate-400 uppercase tracking-widest">STRICT SERIAL CONTROL</span>
                     </div>
 
-                    <form onsubmit="createInventoryItem(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-brand-900 rounded-lg border border-brand-600">
+                    <form id="createItemForm" onsubmit="createInventoryItem(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-brand-900 rounded-lg border border-brand-600">
                         <div>
                             <label class="block text-xs text-slate-400 font-bold mb-1">Item Name</label>
                             <input type="text" id="itemName" placeholder="Huawei GPON ONU" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400">
@@ -133,7 +182,7 @@ const htmlContent = `
                             <input type="text" id="itemSerial" placeholder="SN-HUA-7700" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400">
                         </div>
                         <div class="flex items-end">
-                            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2 px-4 rounded transition duration-200">
+                            <button id="createItemBtn" type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2 px-4 rounded transition duration-200">
                                 Create Serial Asset
                             </button>
                         </div>
@@ -157,16 +206,17 @@ const htmlContent = `
                     </div>
                 </div>
 
-                <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                <!-- Section 2: Finance & Payments -->
+                <div id="financeSection" class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="font-bold text-lg flex items-center space-x-2">
                             <i class="fa-solid fa-file-invoice-dollar text-amber-400"></i>
                             <span>Finance &amp; M-Pesa Micro-Payments</span>
                         </h3>
-                        <span class="text-xs text-slate-400 uppercase tracking-widest">TRUST-BASED RECONCILIATION</span>
+                        <span id="financeHeaderBadge" class="text-xs text-slate-400 uppercase tracking-widest">TRUST-BASED RECONCILIATION</span>
                     </div>
 
-                    <form onsubmit="recordPayment(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-brand-900 rounded-lg border border-brand-600">
+                    <form id="recordPaymentForm" onsubmit="recordPayment(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-brand-900 rounded-lg border border-brand-600">
                         <div>
                             <label class="block text-xs text-slate-400 font-bold mb-1">Invoice ID</label>
                             <select id="payInvoiceId" class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
@@ -181,7 +231,7 @@ const htmlContent = `
                             <input type="text" id="payRef" placeholder="QRE99816AH" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
                         </div>
                         <div class="flex items-end">
-                            <button type="submit" class="w-full bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold py-2 px-4 rounded transition duration-200">
+                            <button id="paymentBtn" type="submit" class="w-full bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold py-2 px-4 rounded transition duration-200">
                                 Push M-Pesa STK
                             </button>
                         </div>
@@ -204,13 +254,14 @@ const htmlContent = `
                     </div>
                 </div>
 
-                <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                <!-- Section 3: Tasks & Hierarchy Timesheets -->
+                <div id="tasksSection" class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="font-bold text-lg flex items-center space-x-2">
                             <i class="fa-solid fa-list-check text-sky-400"></i>
                             <span>Field Technician Timesheets &amp; Tasks</span>
                         </h3>
-                        <span class="text-xs text-slate-400 uppercase tracking-widest">HIERARCHICAL APPROVALS</span>
+                        <span id="tasksHeaderBadge" class="text-xs text-slate-400 uppercase tracking-widest">HIERARCHICAL APPROVALS</span>
                     </div>
 
                     <div class="overflow-x-auto">
@@ -359,77 +410,214 @@ const htmlContent = `
             }
         }
 
+        async function togglePermission(roleName, perm, checkbox) {
+            const currentRole = currentHeaders['Authorization-Roles'];
+            if (currentRole !== 'tenant_admin') {
+                alert('Permission Denied: Only a TenantAdmin is authorized to update RBAC policies.');
+                checkbox.checked = !checkbox.checked;
+                return;
+            }
+
+            // Calculate list of checked permissions for this role
+            const grid = document.getElementById('policyConfigGrid');
+            const checkboxes = grid.querySelectorAll('input[data-role="' + roleName + '"]:checked');
+            const newPerms = [];
+            checkboxes.forEach(cb => {
+                newPerms.push(cb.value);
+            });
+
+            try {
+                const res = await fetch('/api/rbac/update', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ role_name: roleName, permissions: newPerms })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    fetchState();
+                } else {
+                    alert('Error: ' + r.error);
+                }
+            } catch (err) {
+                console.error('Failed to toggle permission:', err);
+            }
+        }
+
         function renderDashboard() {
+            const activeRole = currentHeaders['Authorization-Roles'];
+            const activeTenant = currentHeaders['Authorization-Tenant-Id'];
+
+            // 1. Draw Policy Manager (RBAC/ABAC UI view)
+            const policyGrid = document.getElementById('policyConfigGrid');
+            policyGrid.innerHTML = '';
+
+            const allPermsList = ['inventory:read', 'inventory:write', 'inventory:*', 'finance:read', 'finance:write', 'tasks:read', 'tasks:create', 'tasks:approve', 'timesheets:approve', 'timesheets:submit', '*'];
+
+            const rolesKeys = Object.keys(currentState.roles || {}).sort();
+            rolesKeys.forEach(roleName => {
+                const rolePerms = currentState.roles[roleName] || [];
+                const card = document.createElement('div');
+                card.className = 'bg-brand-900 border border-brand-600 rounded-lg p-4 space-y-2';
+
+                let titleColor = 'text-sky-300';
+                if (roleName === 'tenant_admin') titleColor = 'text-rose-400 font-bold';
+                else if (roleName === 'manager') titleColor = 'text-amber-400';
+
+                card.innerHTML = '<div class="text-xs uppercase font-bold tracking-widest ' + titleColor + '">' + roleName + '</div>';
+
+                const cbContainer = document.createElement('div');
+                cbContainer.className = 'grid grid-cols-2 gap-x-2 gap-y-1';
+
+                allPermsList.forEach(perm => {
+                    const isChecked = rolePerms.includes(perm) || rolePerms.includes('*') ? 'checked' : '';
+
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-2 text-[11px] text-slate-300 cursor-pointer hover:text-slate-100';
+
+                    // Disable inputs if not TenantAdmin to lock control visually
+                    const disabledStr = activeRole === 'tenant_admin' ? '' : 'disabled';
+
+                    label.innerHTML = '<input type="checkbox" value="' + perm + '" data-role="' + roleName + '" ' + isChecked + ' ' + disabledStr + ' onchange="togglePermission(\'' + roleName + '\', \'' + perm + '\', this)" class="rounded bg-brand-500 border-brand-600 text-emerald-500 focus:ring-emerald-500"> ' +
+                        '<span>' + perm + '</span>';
+                    cbContainer.appendChild(label);
+                });
+
+                card.appendChild(cbContainer);
+                policyGrid.appendChild(card);
+            });
+
+            // 2. Fetch inventory, invoice select options
             const paySelect = document.getElementById('payInvoiceId');
             paySelect.innerHTML = '';
-            const currentTenant = currentHeaders['Authorization-Tenant-Id'];
 
+            // Render Inventory Section
             const invBody = document.getElementById('inventoryTableBody');
             invBody.innerHTML = '';
-            Object.values(currentState.inventory || {}).forEach(item => {
-                if (item.tenant_id !== currentTenant) return;
 
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-brand-600 transition';
+            // ABAC: Check inventory clearance view bounds
+            const activeRolePermissions = currentState.roles[activeRole] || [];
+            const canViewInventory = activeRolePermissions.includes('inventory:read') || activeRolePermissions.includes('inventory:*') || activeRolePermissions.includes('*');
+            const canWriteInventory = activeRolePermissions.includes('inventory:write') || activeRolePermissions.includes('inventory:*') || activeRolePermissions.includes('*');
 
-                const statusColor = item.status === 'In_Stock' ? 'text-emerald-400 font-semibold' : 'text-sky-400';
-                const allocText = item.assigned_to ? item.assigned_to : '<span class=\'text-slate-500\'>Unassigned</span>';
+            const invSection = document.getElementById('inventorySection');
+            const createItemForm = document.getElementById('createItemForm');
 
-                const assignBtn = item.status === 'In_Stock'
-                    ? '<button onclick="openAllocationModal(\'' + item.id + '\')" class="text-xs bg-brand-900 text-emerald-400 hover:bg-brand-500 border border-brand-600 rounded py-1 px-2 font-bold transition">Allocate</button>'
-                    : '<span class="text-xs text-slate-500">Allocated</span>';
+            // Dynamic RBAC Action Views mapping
+            if (!canViewInventory) {
+                invSection.classList.add('opacity-50');
+                document.getElementById('inventoryHeaderBadge').innerHTML = '<span class="text-rose-400 font-bold">ACCESS DENIED</span>';
+                invBody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-xs text-rose-400 italic">Role ' + activeRole + ' does not have permission (inventory:read) to view serialized assets.</td></tr>';
+            } else {
+                invSection.classList.remove('opacity-50');
+                document.getElementById('inventoryHeaderBadge').innerText = 'STRICT SERIAL CONTROL';
+            }
 
-                tr.innerHTML = '<td>' + item.id + '</td>' +
-                    '<td>' + item.name + '</td>' +
-                    '<td>' + item.serial_number + '</td>' +
-                    '<td class="' + statusColor + '">' + item.status + '</td>' +
-                    '<td>' + allocText + '</td>' +
-                    '<td>' + assignBtn + '</td>';
-                invBody.appendChild(tr);
-            });
+            // Disable or enable Create form visually
+            if (!canWriteInventory) {
+                createItemForm.classList.add('opacity-40', 'pointer-events-none');
+                document.getElementById('createItemBtn').disabled = true;
+            } else {
+                createItemForm.classList.remove('opacity-40', 'pointer-events-none');
+                document.getElementById('createItemBtn').disabled = false;
+            }
 
+            if (canViewInventory) {
+                Object.values(currentState.inventory || {}).forEach(item => {
+                    if (item.tenant_id !== activeTenant) return;
+
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-brand-600 transition';
+
+                    const statusColor = item.status === 'In_Stock' ? 'text-emerald-400 font-semibold' : 'text-sky-400';
+                    const allocText = item.assigned_to ? item.assigned_to : '<span class=\'text-slate-500\'>Unassigned</span>';
+
+                    // Button disabled bounds
+                    const assignBtn = item.status === 'In_Stock'
+                        ? '<button onclick="openAllocationModal(\'' + item.id + '\')" ' + (canWriteInventory ? '' : 'disabled') + ' class="text-xs bg-brand-900 text-emerald-400 hover:bg-brand-500 border border-brand-600 rounded py-1 px-2 font-bold transition disabled:opacity-40">Allocate</button>'
+                        : '<span class="text-xs text-slate-500">Allocated</span>';
+
+                    tr.innerHTML = '<td class="py-3 px-4 font-mono">' + item.id + '</td>' +
+                        '<td class="py-3 px-4">' + item.name + '</td>' +
+                        '<td class="py-3 px-4 font-mono">' + item.serial_number + '</td>' +
+                        '<td class="py-3 px-4 ' + statusColor + '">' + item.status + '</td>' +
+                        '<td class="py-3 px-4 text-emerald-300 font-medium">' + allocText + '</td>' +
+                        '<td class="py-3 px-4">' + assignBtn + '</td>';
+                    invBody.appendChild(tr);
+                });
+            }
+
+            // Render Finance Section (ABAC Checks)
+            const canViewFinance = activeRolePermissions.includes('finance:read') || activeRolePermissions.includes('finance:*') || activeRolePermissions.includes('*');
+            const canWriteFinance = activeRolePermissions.includes('finance:write') || activeRolePermissions.includes('finance:*') || activeRolePermissions.includes('*');
+
+            const financeSection = document.getElementById('financeSection');
+            const recordPaymentForm = document.getElementById('recordPaymentForm');
             const finBody = document.getElementById('financeTableBody');
             finBody.innerHTML = '';
-            Object.values(currentState.invoices || {}).forEach(inv => {
-                if (inv.tenant_id !== currentTenant) return;
 
-                const opt = document.createElement('option');
-                opt.value = inv.id;
-                opt.text = inv.id + ' (Bal: KSh ' + inv.balance_amount + ')';
-                paySelect.appendChild(opt);
+            if (!canViewFinance) {
+                financeSection.classList.add('opacity-50');
+                document.getElementById('financeHeaderBadge').innerHTML = '<span class="text-rose-400 font-bold">ACCESS DENIED</span>';
+                finBody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-xs text-rose-400 italic">Role ' + activeRole + ' does not have permission (finance:read) to view credit invoices.</td></tr>';
+            } else {
+                financeSection.classList.remove('opacity-50');
+                document.getElementById('financeHeaderBadge').innerText = 'TRUST-BASED RECONCILIATION';
+            }
 
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-brand-600 transition';
+            if (!canWriteFinance) {
+                recordPaymentForm.classList.add('opacity-40', 'pointer-events-none');
+                document.getElementById('paymentBtn').disabled = true;
+            } else {
+                recordPaymentForm.classList.remove('opacity-40', 'pointer-events-none');
+                document.getElementById('paymentBtn').disabled = false;
+            }
 
-                const statusColor = inv.status === 'Paid' ? 'text-emerald-400 font-bold' : (inv.status === 'Partially_Paid' ? 'text-amber-400' : 'text-slate-300');
+            if (canViewFinance) {
+                Object.values(currentState.invoices || {}).forEach(inv => {
+                    if (inv.tenant_id !== activeTenant) return;
 
-                tr.innerHTML = '<td>' + inv.id + '</td>' +
-                    '<td>KSh ' + inv.total_amount.toFixed(2) + '</td>' +
-                    '<td>KSh ' + inv.paid_amount.toFixed(2) + '</td>' +
-                    '<td>KSh ' + inv.balance_amount.toFixed(2) + '</td>' +
-                    '<td class="' + statusColor + '">' + inv.status + '</td>';
-                finBody.appendChild(tr);
-            });
+                    const opt = document.createElement('option');
+                    opt.value = inv.id;
+                    opt.text = inv.id + ' (Bal: KSh ' + inv.balance_amount + ')';
+                    paySelect.appendChild(opt);
 
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-brand-600 transition';
+
+                    const statusColor = inv.status === 'Paid' ? 'text-emerald-400 font-bold' : (inv.status === 'Partially_Paid' ? 'text-amber-400' : 'text-slate-300');
+
+                    tr.innerHTML = '<td class="py-3 px-4 font-bold">' + inv.id + '</td>' +
+                        '<td class="py-3 px-4 font-mono">KSh ' + inv.total_amount.toFixed(2) + '</td>' +
+                        '<td class="py-3 px-4 font-mono">KSh ' + inv.paid_amount.toFixed(2) + '</td>' +
+                        '<td class="py-3 px-4 font-mono text-rose-400">KSh ' + inv.balance_amount.toFixed(2) + '</td>' +
+                        '<td class="py-3 px-4 ' + statusColor + '">' + inv.status + '</td>';
+                    finBody.appendChild(tr);
+                });
+            }
+
+            // Render Tasks & Timesheets Section (Hierarchy ABAC Checks)
             const tsBody = document.getElementById('timesheetsTableBody');
             tsBody.innerHTML = '';
+
+            const canApproveTimesheets = activeRolePermissions.includes('timesheets:approve') || activeRolePermissions.includes('tasks:*') || activeRolePermissions.includes('*');
+
             Object.values(currentState.timesheets || {}).forEach(ts => {
-                if (ts.tenant_id !== currentTenant) return;
+                if (ts.tenant_id !== activeTenant) return;
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-brand-600 transition';
 
                 const approveBtn = ts.status === 'Submitted'
-                    ? '<button onclick="approveTimesheet(\'' + ts.id + '\')" class="text-xs bg-sky-600 hover:bg-sky-500 text-white font-bold py-1 px-2 rounded">Approve</button>'
+                    ? '<button onclick="approveTimesheet(\'' + ts.id + '\')" ' + (canApproveTimesheets ? '' : 'disabled') + ' class="text-xs bg-sky-600 hover:bg-sky-500 text-white font-bold py-1 px-2 rounded disabled:opacity-40">Approve</button>'
                     : '<span class="text-slate-500 text-xs">Approved</span>';
 
-                tr.innerHTML = '<td>' + ts.id + '</td>' +
-                    '<td>' + ts.task_id + '</td>' +
-                    '<td>' + ts.user_id + '</td>' +
-                    '<td>' + ts.hours + ' hrs</td>' +
-                    '<td>' + ts.status + '</td>' +
-                    '<td>' + (ts.approved_by || '-') + '</td>' +
-                    '<td>' + approveBtn + '</td>';
+                tr.innerHTML = '<td class="py-3 px-4 font-mono">' + ts.id + '</td>' +
+                    '<td class="py-3 px-4 font-mono">' + ts.task_id + '</td>' +
+                    '<td class="py-3 px-4 text-emerald-300 font-medium">' + ts.user_id + '</td>' +
+                    '<td class="py-3 px-4 font-bold">' + ts.hours + ' hrs</td>' +
+                    '<td class="py-3 px-4">' + ts.status + '</td>' +
+                    '<td class="py-3 px-4 text-slate-400 font-medium">' + (ts.approved_by || '-') + '</td>' +
+                    '<td class="py-3 px-4">' + approveBtn + '</td>';
                 tsBody.appendChild(tr);
             });
         }
@@ -452,7 +640,7 @@ const htmlContent = `
                     document.getElementById('itemSerial').value = '';
                     setTimeout(fetchState, 1500);
                 } else {
-                    alert('Error: ' + r.error);
+                    alert('Error: ' + (r.error || r.message));
                 }
             } catch (err) {
                 console.error('Failed item create:', err);
@@ -478,7 +666,7 @@ const htmlContent = `
                     document.getElementById('payRef').value = '';
                     setTimeout(fetchState, 1500);
                 } else {
-                    alert('Error: ' + r.error);
+                    alert('Error: ' + (r.error || r.message));
                 }
             } catch (err) {
                 console.error('Failed payment recording:', err);
@@ -542,7 +730,7 @@ const htmlContent = `
                     closeModal();
                     setTimeout(fetchState, 1500);
                 } else {
-                    alert('Error: ' + r.error);
+                    alert('Error: ' + (r.error || r.message));
                 }
             } catch (err) {
                 console.error('Failed assign device:', err);

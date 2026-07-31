@@ -269,6 +269,29 @@ func (d *Database) SaveTimesheet(ts *types.Timesheet) {
 	d.Timesheets[ts.ID] = ts
 }
 
+// UpdateRolePermissions allows interactive toggling of RBAC permissions from the UI console
+func (d *Database) UpdateRolePermissions(roleName string, permissions []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if r, exists := d.Roles[roleName]; exists {
+		r.Permissions = permissions
+	}
+}
+
+// GetRoles returns a thread-safe deep copy of the roles map
+func (d *Database) GetRoles() map[string][]string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	rolesCopy := make(map[string][]string)
+	for name, r := range d.Roles {
+		permsCopy := make([]string, len(r.Permissions))
+		copy(permsCopy, r.Permissions)
+		rolesCopy[name] = permsCopy
+	}
+	return rolesCopy
+}
+
 // GetState returns thread-safe deep copy of ERP collections
 func (d *Database) GetState() map[string]interface{} {
 	d.mu.RLock()
