@@ -37,68 +37,60 @@ func main() {
 		log.Fatalf("Failed to retrieve JetStream context: %v", err)
 	}
 
-	streamName := "SALES"
-	streamSubject := "erp.sales.>"
+	// Setup Multi-Tenant Streams: INVENTORY, FINANCE, TASKS
+	setupStream(js, "INVENTORY", "erp.inventory.>")
+	setupStream(js, "FINANCE", "erp.finance.>")
+	setupStream(js, "TASKS", "erp.tasks.>")
 
-	// Try to get the stream first
-	_, err = js.StreamInfo(streamName)
+	// Setup Durable Consumers
+	setupConsumer(js, "INVENTORY", "InventoryWorker", "erp.inventory.item.cmd.>")
+	setupConsumer(js, "FINANCE", "FinanceWorker", "erp.finance.payment.cmd.>")
+	setupConsumer(js, "TASKS", "TaskTimesheetWorker", "erp.tasks.timesheet.cmd.>")
+
+	// 4. Initialize SQLite Persistent Log Database
+	sqliteDB, err := db.InitSQLite("erp.db")
 	if err != nil {
-		log.Printf("SALES stream not found, creating it: %v", err)
-		_, err = js.AddStream(&nats.StreamConfig{
-			Name:     streamName,
-			Subjects: []string{streamSubject},
-			Storage:  nats.FileStorage,
-		})
-		if err != nil {
-			log.Fatalf("Failed to add SALES stream: %v", err)
-		}
+		log.Fatalf("Failed to initialize SQLite persistent database: %v", err)
 	}
 
-	// 3. Setup Durable Consumer "OrderApprovalWorker" bound to "erp.sales.order.cmd.approve"
-	consumerName := "OrderApprovalWorker"
-	_, err = js.ConsumerInfo(streamName, consumerName)
-	if err != nil {
-		log.Printf("OrderApprovalWorker consumer not found, creating durable consumer: %v", err)
-		_, err = js.AddConsumer(streamName, &nats.ConsumerConfig{
-			Durable:        consumerName,
-			FilterSubject:  "erp.sales.order.cmd.approve",
-			DeliverPolicy:  nats.DeliverAllPolicy,
-			AckPolicy:      nats.AckExplicitPolicy,
-			MaxDeliver:     5,
-		})
-		if err != nil {
-			log.Fatalf("Failed to create Durable Consumer: %v", err)
-		}
-	}
-
-	// 4. Initialize Database
+	// Initialize In-Memory Database
 	database := db.NewDatabase()
 
 	// 5. Initialize downstream JetStream Consumer in background
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = consumer.StartOrderProcessor(ctx, nc, database)
-	if err != nil {
-		log.Fatalf("Failed to start JetStream Consumer Processor: %v", err)
-	}
+	_ = consumer.StartERPProcessors(ctx, nc, database, sqliteDB)
 
 	// 6. Initialize Echo Server
 	e := echo.New()
 	e.Use(echo_middleware.Logger())
 	e.Use(echo_middleware.Recover())
 
+	// UI Dashboard Endpoint (No Auth header required for page load itself)
+	uiHandler := handler.NewUIHandler(database, sqliteDB)
+	e.GET("/", uiHandler.ServeDashboard)
+
 	// Set up mock auth middleware on all API group requests
 	api := e.Group("/api")
 	api.Use(middleware.MockAuthMiddleware())
 
-	h := handler.NewOrderHandler(nc, js)
+	// State and live log endpoints for UI rendering
+	api.GET("/state", uiHandler.GetState)
+	api.GET("/logs", uiHandler.GetLogs)
+	e.GET("/api/exports/excel", uiHandler.ExportLogsExcel) // Export route direct download
 
-	// Create Order Endpoint (Edge RBAC allows sales_rep)
-	api.POST("/orders", h.CreateOrderHandler, middleware.EdgeRBACMiddleware("sales_rep"))
+	h := handler.NewERPHandler(nc, js, sqliteDB)
 
-	// Approve Order Endpoint (Edge RBAC allows manager)
-	api.POST("/orders/approve", h.ApproveOrderHandler, middleware.EdgeRBACMiddleware("manager"))
+	// Inventory Endpoints: (Hierarchy Checks via middleware permission levels)
+	api.POST("/inventory", h.CreateInventoryItemHandler, middleware.ModuleClearanceMiddleware(database, "inventory:write"))
+	api.POST("/inventory/assign", h.AssignDeviceHandler, middleware.ModuleClearanceMiddleware(database, "inventory:*"))
+
+	// Finance Endpoints:
+	api.POST("/finance/payments", h.RecordPaymentHandler, middleware.ModuleClearanceMiddleware(database, "finance:write"))
+
+	// Tasks Endpoints:
+	api.POST("/tasks/timesheets/approve", h.ApproveTimesheetHandler, middleware.ModuleClearanceMiddleware(database, "timesheets:approve"))
 
 	// 7. Start server gracefully
 	go func() {
@@ -118,5 +110,37 @@ func main() {
 
 	if err := e.Shutdown(ctxShutDown); err != nil {
 		log.Printf("Server shutdown error: %v", err)
+	}
+}
+
+func setupStream(js nats.JetStreamContext, streamName, streamSubject string) {
+	_, err := js.StreamInfo(streamName)
+	if err != nil {
+		log.Printf("Stream %s not found, creating: %v", streamName, err)
+		_, err = js.AddStream(&nats.StreamConfig{
+			Name:     streamName,
+			Subjects: []string{streamSubject},
+			Storage:  nats.FileStorage,
+		})
+		if err != nil {
+			log.Printf("Warning: Failed to create stream %s: %v", streamName, err)
+		}
+	}
+}
+
+func setupConsumer(js nats.JetStreamContext, streamName, consumerName, filterSubject string) {
+	_, err := js.ConsumerInfo(streamName, consumerName)
+	if err != nil {
+		log.Printf("Consumer %s not found under stream %s, creating: %v", consumerName, streamName, err)
+		_, err = js.AddConsumer(streamName, &nats.ConsumerConfig{
+			Durable:       consumerName,
+			FilterSubject: filterSubject,
+			DeliverPolicy: nats.DeliverAllPolicy,
+			AckPolicy:     nats.AckExplicitPolicy,
+			MaxDeliver:    5,
+		})
+		if err != nil {
+			log.Printf("Warning: Failed to create durable consumer %s: %v", consumerName, err)
+		}
 	}
 }
