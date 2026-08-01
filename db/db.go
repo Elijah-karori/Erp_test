@@ -269,6 +269,20 @@ func (d *Database) SaveTimesheet(ts *types.Timesheet) {
 	d.Timesheets[ts.ID] = ts
 }
 
+// CreateTenant creates a new Tenant dynamically
+func (d *Database) CreateTenant(id, name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.Tenants[id] = &types.Tenant{ID: id, Name: name}
+}
+
+// CreateUser creates a new User dynamically
+func (d *Database) CreateUser(id, tenantID, name, roleName, region string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.Users[id] = &types.User{ID: id, TenantID: tenantID, Name: name, RoleName: roleName, Region: region}
+}
+
 // UpdateRolePermissions allows interactive toggling of RBAC permissions from the UI console
 func (d *Database) UpdateRolePermissions(roleName string, permissions []string) {
 	d.mu.Lock()
@@ -276,6 +290,60 @@ func (d *Database) UpdateRolePermissions(roleName string, permissions []string) 
 	if r, exists := d.Roles[roleName]; exists {
 		r.Permissions = permissions
 	}
+}
+
+// AllocateInventoryItemTransaction allocates a serialized device under safe write lock protection
+func (d *Database) AllocateInventoryItemTransaction(id string, assignedTo string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	item, exists := d.Inventory[id]
+	if !exists {
+		return fmt.Errorf("item %s not found", id)
+	}
+
+	// Clone to avoid pointer data race under concurrent UI reads
+	itemCopy := *item
+	itemCopy.Status = "Assigned"
+	itemCopy.AssignedTo = assignedTo
+	d.Inventory[id] = &itemCopy
+	return nil
+}
+
+// ApplyPaymentTransaction updates invoice status and outstanding balance under safe lock
+func (d *Database) ApplyPaymentTransaction(id string, amount float64) (*types.Invoice, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	inv, exists := d.Invoices[id]
+	if !exists {
+		return nil, fmt.Errorf("invoice %s not found", id)
+	}
+
+	invCopy := *inv
+	invCopy.PaidAmount += amount
+	invCopy.BalanceAmount = invCopy.TotalAmount - invCopy.PaidAmount
+	if invCopy.BalanceAmount <= 0 {
+		invCopy.Status = "Paid"
+	} else {
+		invCopy.Status = "Partially_Paid"
+	}
+	d.Invoices[id] = &invCopy
+	return &invCopy, nil
+}
+
+// ApproveTimesheetTransaction approves technician hours under safe lock
+func (d *Database) ApproveTimesheetTransaction(id string, approvedBy string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ts, exists := d.Timesheets[id]
+	if !exists {
+		return fmt.Errorf("timesheet %s not found", id)
+	}
+
+	tsCopy := *ts
+	tsCopy.Status = "Approved"
+	tsCopy.ApprovedBy = approvedBy
+	d.Timesheets[id] = &tsCopy
+	return nil
 }
 
 // GetRoles returns a thread-safe deep copy of the roles map

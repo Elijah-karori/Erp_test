@@ -119,9 +119,12 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 				return
 			}
 
-			item.Status = "Assigned"
-			item.AssignedTo = cmd.UserID
-			database.SaveInventoryItem(item)
+			err = database.AllocateInventoryItemTransaction(cmd.ItemID, cmd.UserID)
+			if err != nil {
+				log.Printf("INVENTORY ABAC: Allocation failed: %v", err)
+				msg.Term()
+				return
+			}
 
 			log.Printf("INVENTORY: Serialized asset %s allocated to tech %s under tenant %s", item.ID, cmd.UserID, tenantID)
 			sdb.Log(tenantID, userID, "AssignItem_Success", fmt.Sprintf("Asset %s allocated to tech %s", cmd.ItemID, cmd.UserID))
@@ -181,23 +184,21 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 			}
 			database.SavePayment(payment)
 
-			// Update Invoice (Partial payments & immediate confirmation alerts)
-			inv.PaidAmount += cmd.Amount
-			inv.BalanceAmount = inv.TotalAmount - inv.PaidAmount
-			if inv.BalanceAmount <= 0 {
-				inv.Status = "Paid"
-			} else {
-				inv.Status = "Partially_Paid"
+			// Update Invoice (Partial payments & immediate confirmation alerts) via thread-safe transaction
+			updatedInv, err := database.ApplyPaymentTransaction(cmd.InvoiceID, cmd.Amount)
+			if err != nil {
+				log.Printf("FINANCE ABAC: Apply payment failed: %v", err)
+				msg.Term()
+				return
 			}
-			database.SaveInvoice(inv)
 
 			log.Printf("FINANCE: Applied payment %s KSh %.2f to invoice %s under tenant %s. New Status: %s",
-				pmtID, cmd.Amount, inv.ID, tenantID, inv.Status)
+				pmtID, cmd.Amount, updatedInv.ID, tenantID, updatedInv.Status)
 
-			sdb.Log(tenantID, userID, "Payment_Reconciled", fmt.Sprintf("M-Pesa payment of KSh %.2f applied to invoice %s (Ref: %s). New invoice status: %s", cmd.Amount, inv.ID, cmd.Reference, inv.Status))
+			sdb.Log(tenantID, userID, "Payment_Reconciled", fmt.Sprintf("M-Pesa payment of KSh %.2f applied to invoice %s (Ref: %s). New invoice status: %s", cmd.Amount, updatedInv.ID, cmd.Reference, updatedInv.Status))
 
 			// Fast confirmation event trigger to customer
-			publishImmediateSMSConfirmation(js, tenantID, inv.CustomerID, cmd.Amount, inv.BalanceAmount)
+			publishImmediateSMSConfirmation(js, tenantID, updatedInv.CustomerID, cmd.Amount, updatedInv.BalanceAmount)
 
 			msg.Ack()
 		}
@@ -259,9 +260,12 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 				return
 			}
 
-			ts.Status = "Approved"
-			ts.ApprovedBy = userID
-			database.SaveTimesheet(ts)
+			err = database.ApproveTimesheetTransaction(cmd.TimesheetID, userID)
+			if err != nil {
+				log.Printf("TASKS ABAC: Timesheet approval failed: %v", err)
+				msg.Term()
+				return
+			}
 
 			log.Printf("TASKS: Timesheet %s successfully approved by superior %s under tenant %s", ts.ID, userID, tenantID)
 			sdb.Log(tenantID, userID, "ApproveTimesheet_Success", fmt.Sprintf("Approved timesheet %s for subordinate technician %s", cmd.TimesheetID, ts.UserID))
