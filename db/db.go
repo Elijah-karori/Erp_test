@@ -11,28 +11,34 @@ import (
 
 // Database represents a safe in-memory database mock for multi-tenant ERP operations
 type Database struct {
-	mu         sync.RWMutex
-	Tenants    map[string]*types.Tenant
-	Users      map[string]*types.User
-	Roles      map[string]*types.Role
-	Inventory  map[string]*types.InventoryItem
-	Invoices   map[string]*types.Invoice
-	Payments   map[string]*types.Payment
-	Tasks      map[string]*types.Task
-	Timesheets map[string]*types.Timesheet
+	mu                sync.RWMutex
+	Tenants           map[string]*types.Tenant
+	Users             map[string]*types.User
+	Roles             map[string]*types.Role
+	Inventory         map[string]*types.InventoryItem
+	Invoices          map[string]*types.Invoice
+	Payments          map[string]*types.Payment
+	Tasks             map[string]*types.Task
+	Timesheets        map[string]*types.Timesheet
+	Customers         map[string]*types.Customer
+	MaterialRequests  map[string]*types.MaterialRequest
+	ProcurementOrders map[string]*types.ProcurementOrder
 }
 
 // NewDatabase initializes a new mock database with multi-tenant seed data
 func NewDatabase() *Database {
 	d := &Database{
-		Tenants:    make(map[string]*types.Tenant),
-		Users:      make(map[string]*types.User),
-		Roles:      make(map[string]*types.Role),
-		Inventory:  make(map[string]*types.InventoryItem),
-		Invoices:   make(map[string]*types.Invoice),
-		Payments:   make(map[string]*types.Payment),
-		Tasks:      make(map[string]*types.Task),
-		Timesheets: make(map[string]*types.Timesheet),
+		Tenants:           make(map[string]*types.Tenant),
+		Users:             make(map[string]*types.User),
+		Roles:             make(map[string]*types.Role),
+		Inventory:         make(map[string]*types.InventoryItem),
+		Invoices:          make(map[string]*types.Invoice),
+		Payments:          make(map[string]*types.Payment),
+		Tasks:             make(map[string]*types.Task),
+		Timesheets:        make(map[string]*types.Timesheet),
+		Customers:         make(map[string]*types.Customer),
+		MaterialRequests:  make(map[string]*types.MaterialRequest),
+		ProcurementOrders: make(map[string]*types.ProcurementOrder),
 	}
 
 	// 1. Seed Roles with Hierarchy and Permissions
@@ -62,16 +68,23 @@ func NewDatabase() *Database {
 	d.Tenants["tenant_safari"] = &types.Tenant{ID: "tenant_safari", Name: "Safaricom ISP Services"}
 	d.Tenants["tenant_pioneer"] = &types.Tenant{ID: "tenant_pioneer", Name: "Pioneer Printer Maintenance"}
 
-	// 3. Seed Users across Tenants and Regions
+	// 3. Seed Users across Tenants and Regions with credentials
 	// Tenant: Safari
-	d.Users["usr_safari_admin"] = &types.User{ID: "usr_safari_admin", TenantID: "tenant_safari", Name: "Alice Admin", RoleName: "tenant_admin", Region: "Nairobi"}
-	d.Users["usr_safari_mgr"] = &types.User{ID: "usr_safari_mgr", TenantID: "tenant_safari", Name: "Bob Manager", RoleName: "manager", Region: "Nairobi"}
-	d.Users["usr_safari_tech"] = &types.User{ID: "usr_safari_tech", TenantID: "tenant_safari", Name: "Charlie Tech", RoleName: "field_technician", Region: "Mombasa"}
+	d.Users["usr_safari_admin"] = &types.User{ID: "usr_safari_admin", TenantID: "tenant_safari", Name: "Alice Admin", RoleName: "tenant_admin", Region: "Nairobi", Password: "admin"}
+	d.Users["usr_safari_mgr"] = &types.User{ID: "usr_safari_mgr", TenantID: "tenant_safari", Name: "Bob Manager", RoleName: "manager", Region: "Nairobi", Password: "password"}
+	d.Users["usr_safari_tech"] = &types.User{ID: "usr_safari_tech", TenantID: "tenant_safari", Name: "Charlie Tech", RoleName: "field_technician", Region: "Mombasa", Password: "password"}
 
 	// Tenant: Pioneer
-	d.Users["usr_pioneer_mgr"] = &types.User{ID: "usr_pioneer_mgr", TenantID: "tenant_pioneer", Name: "Daniel Manager", RoleName: "manager", Region: "Kisumu"}
-	d.Users["usr_pioneer_fin"] = &types.User{ID: "usr_pioneer_fin", TenantID: "tenant_pioneer", Name: "Eva Finance", RoleName: "finance_officer", Region: "Kisumu"}
-	d.Users["usr_pioneer_tech"] = &types.User{ID: "usr_pioneer_tech", TenantID: "tenant_pioneer", Name: "Frank Tech", RoleName: "field_technician", Region: "Nairobi"}
+	d.Users["usr_pioneer_mgr"] = &types.User{ID: "usr_pioneer_mgr", TenantID: "tenant_pioneer", Name: "Daniel Manager", RoleName: "manager", Region: "Kisumu", Password: "password"}
+	d.Users["usr_pioneer_fin"] = &types.User{ID: "usr_pioneer_fin", TenantID: "tenant_pioneer", Name: "Eva Finance", RoleName: "finance_officer", Region: "Kisumu", Password: "password"}
+	d.Users["usr_pioneer_tech"] = &types.User{ID: "usr_pioneer_tech", TenantID: "tenant_pioneer", Name: "Frank Tech", RoleName: "field_technician", Region: "Nairobi", Password: "password"}
+
+	// Seed some Customers
+	d.Customers["cust_saf_77"] = &types.Customer{ID: "cust_saf_77", TenantID: "tenant_safari", Name: "Safaricom client Nairobi", Phone: "254711223344", Email: "saf_client@gmail.com", DeviceID: "item_onu_2", InvoiceID: "inv_safari_1", DispatchStatus: "Pending"}
+	d.Customers["cust_pio_88"] = &types.Customer{ID: "cust_pio_88", TenantID: "tenant_pioneer", Name: "Pioneer Kisumu printer client", Phone: "254755667788", Email: "pioneer_client@gmail.com", DeviceID: "item_printer_part", InvoiceID: "inv_pioneer_1", DispatchStatus: "Pending"}
+
+	// Seed some material requests
+	d.MaterialRequests["req_safari_1"] = &types.MaterialRequest{ID: "req_safari_1", TenantID: "tenant_safari", TaskID: "task_safari_install", RequesterID: "usr_safari_tech", ItemName: "Huawei GPON ONU", Status: "Pending_Leader_Approval", Timestamp: time.Now()}
 
 	// 4. Seed Serialized Inventory
 	d.Inventory["item_onu_1"] = &types.InventoryItem{
@@ -280,7 +293,121 @@ func (d *Database) CreateTenant(id, name string) {
 func (d *Database) CreateUser(id, tenantID, name, roleName, region string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.Users[id] = &types.User{ID: id, TenantID: tenantID, Name: name, RoleName: roleName, Region: region}
+	d.Users[id] = &types.User{ID: id, TenantID: tenantID, Name: name, RoleName: roleName, Region: region, Password: "password"}
+}
+
+// ResetPasswordTransaction updates user password
+func (d *Database) ResetPasswordTransaction(userID, newPassword string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	u, exists := d.Users[userID]
+	if !exists {
+		return errors.New("user not found")
+	}
+
+	uCopy := *u
+	uCopy.Password = newPassword
+	d.Users[userID] = &uCopy
+	return nil
+}
+
+// CreateMaterialRequestTransaction inserts a material request
+func (d *Database) CreateMaterialRequestTransaction(id, tenantID, taskID, requesterID, itemName string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.MaterialRequests[id] = &types.MaterialRequest{
+		ID:          id,
+		TenantID:    tenantID,
+		TaskID:      taskID,
+		RequesterID: requesterID,
+		ItemName:    itemName,
+		Status:      "Pending_Leader_Approval",
+		Timestamp:   time.Now(),
+	}
+}
+
+// ApproveMaterialRequestTransaction handles material approvals and procurement fallbacks
+func (d *Database) ApproveMaterialRequestTransaction(id, tenantID, approverID string) (*types.MaterialRequest, *types.ProcurementOrder, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	req, exists := d.MaterialRequests[id]
+	if !exists {
+		return nil, nil, fmt.Errorf("material request %s not found", id)
+	}
+
+	// 1. Check if we have an "In_Stock" inventory item matching the requested item type
+	var foundItem *types.InventoryItem
+	for _, item := range d.Inventory {
+		if item.TenantID == tenantID && item.Name == req.ItemName && item.Status == "In_Stock" {
+			foundItem = item
+			break
+		}
+	}
+
+	reqCopy := *req
+	var procOrder *types.ProcurementOrder
+
+	if foundItem != nil {
+		// Fulfill material request from current in-stock inventory
+		itemCopy := *foundItem
+		itemCopy.Status = "Assigned"
+		itemCopy.AssignedTo = req.RequesterID
+		d.Inventory[foundItem.ID] = &itemCopy
+
+		reqCopy.Status = "Fulfilled"
+		reqCopy.AllocatedSN = foundItem.SerialNumber
+		d.MaterialRequests[id] = &reqCopy
+	} else {
+		// Out of stock fallback! Trigger Procurement workflow
+		reqCopy.Status = "Procuring"
+		d.MaterialRequests[id] = &reqCopy
+
+		procID := "proc_" + id
+		procOrder = &types.ProcurementOrder{
+			ID:           procID,
+			TenantID:     tenantID,
+			RequestID:    id,
+			ItemName:     req.ItemName,
+			ExpectedTime: time.Now().Add(10 * 24 * time.Hour), // 10-days timeline
+			Status:       "Bidding",
+		}
+		d.ProcurementOrders[procID] = procOrder
+	}
+
+	return &reqCopy, procOrder, nil
+}
+
+// CreateCustomerTransaction registers a client dynamically
+func (d *Database) CreateCustomerTransaction(id, tenantID, name, phone, email string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.Customers[id] = &types.Customer{
+		ID:             id,
+		TenantID:       tenantID,
+		Name:           name,
+		Phone:          phone,
+		Email:          email,
+		DispatchStatus: "Pending",
+	}
+}
+
+// UpdateCustomerDeviceTransaction binds invoice, serial ONU router device, and sets dispatch state
+func (d *Database) UpdateCustomerDeviceTransaction(id, deviceID, invoiceID, dispatchStatus string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	cust, exists := d.Customers[id]
+	if !exists {
+		return fmt.Errorf("customer %s not found", id)
+	}
+
+	custCopy := *cust
+	custCopy.DeviceID = deviceID
+	custCopy.InvoiceID = invoiceID
+	custCopy.DispatchStatus = dispatchStatus
+	d.Customers[id] = &custCopy
+	return nil
 }
 
 // UpdateRolePermissions allows interactive toggling of RBAC permissions from the UI console
@@ -385,12 +512,30 @@ func (d *Database) GetState() map[string]interface{} {
 		timesheetsCopy[k] = v
 	}
 
+	customersCopy := make(map[string]*types.Customer)
+	for k, v := range d.Customers {
+		customersCopy[k] = v
+	}
+
+	materialCopy := make(map[string]*types.MaterialRequest)
+	for k, v := range d.MaterialRequests {
+		materialCopy[k] = v
+	}
+
+	procureCopy := make(map[string]*types.ProcurementOrder)
+	for k, v := range d.ProcurementOrders {
+		procureCopy[k] = v
+	}
+
 	return map[string]interface{}{
-		"tenants":    d.Tenants,
-		"users":      d.Users,
-		"inventory":  inventoryCopy,
-		"invoices":   invoicesCopy,
-		"tasks":      tasksCopy,
-		"timesheets": timesheetsCopy,
+		"tenants":            d.Tenants,
+		"users":              d.Users,
+		"inventory":          inventoryCopy,
+		"invoices":           invoicesCopy,
+		"tasks":              tasksCopy,
+		"timesheets":         timesheetsCopy,
+		"customers":          customersCopy,
+		"material_requests":  materialCopy,
+		"procurement_orders": procureCopy,
 	}
 }

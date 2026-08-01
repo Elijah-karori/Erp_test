@@ -5,9 +5,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-)
 
-import (
 	"erp-event-bus/db"
 )
 

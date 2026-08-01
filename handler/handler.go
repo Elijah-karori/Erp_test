@@ -144,3 +144,111 @@ func (h *ERPHandler) ApproveTimesheetHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusAccepted, map[string]string{"message": "Timesheet approval queued"})
 }
+
+// ResetPasswordHandler publishes password resets to NATS
+func (h *ERPHandler) ResetPasswordHandler(c echo.Context) error {
+	var cmd types.ResetPasswordCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.UserID == "" || cmd.NewPassword == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "UserID and NewPassword are required"})
+	}
+
+	msg := h.newContextMsg("erp.users.auth.cmd.reset_password", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish reset password command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "ResetPassword_Request", fmt.Sprintf("Queued credential reset for user %s", cmd.UserID))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Password reset queued"})
+}
+
+// SubmitMaterialRequestHandler registers a technician material requisition
+func (h *ERPHandler) SubmitMaterialRequestHandler(c echo.Context) error {
+	var cmd types.SubmitMaterialRequestCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.TaskID == "" || cmd.ItemName == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "TaskID and ItemName are required"})
+	}
+
+	msg := h.newContextMsg("erp.tasks.materials.cmd.request", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish material request command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "MaterialRequest_Request", fmt.Sprintf("Queued material request of '%s' for task %s", cmd.ItemName, cmd.TaskID))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Material request queued"})
+}
+
+// ApproveMaterialHandler handles team lead approvals
+func (h *ERPHandler) ApproveMaterialHandler(c echo.Context) error {
+	var cmd types.ApproveMaterialCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.RequestID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "RequestID is required"})
+	}
+
+	msg := h.newContextMsg("erp.tasks.materials.cmd.approve", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish material approval command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "MaterialApproval_Request", fmt.Sprintf("Queued approval of material request %s", cmd.RequestID))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Material approval queued"})
+}
+
+// CreateCustomerHandler registers customers dynamically
+func (h *ERPHandler) CreateCustomerHandler(c echo.Context) error {
+	var cmd types.CreateCustomerCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.ID == "" || cmd.Name == "" || cmd.Phone == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ID, Name, and Phone are required"})
+	}
+
+	msg := h.newContextMsg("erp.customers.crm.cmd.create", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish customer create command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "CreateCustomer_Request", fmt.Sprintf("Queued registration of customer %s (%s)", cmd.Name, cmd.Phone))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Customer creation queued"})
+}

@@ -24,13 +24,48 @@ type Role struct {
 	Permissions []string `json:"permissions"`   // Module access permissions (e.g. "inventory:read", "finance:write", "tasks:approve")
 }
 
-// User account details
+// User account details with password credentials support
 type User struct {
 	ID       string `json:"id"`
 	TenantID string `json:"tenant_id"`
 	Name     string `json:"name"`
 	RoleName string `json:"role_name"`
 	Region   string `json:"region"`
+	Password string `json:"password"` // Encrypted or plain in mock
+}
+
+// Customer details
+type Customer struct {
+	ID           string `json:"id"`
+	TenantID     string `json:"tenant_id"`
+	Name         string `json:"name"`
+	Phone        string `json:"phone"`
+	Email        string `json:"email"`
+	DeviceID     string `json:"device_id"`     // Connected serial device
+	InvoiceID    string `json:"invoice_id"`    // Connected invoice
+	DispatchStatus string `json:"dispatch_status"` // e.g. "Pending", "Dispatched", "Delivered"
+}
+
+// Material request workflow (Routers, materials)
+type MaterialRequest struct {
+	ID            string    `json:"id"`
+	TenantID      string    `json:"tenant_id"`
+	TaskID        string    `json:"task_id"`
+	RequesterID   string    `json:"requester_id"` // Technician ID
+	ItemName      string    `json:"item_name"`    // e.g. "GPON ONU Router"
+	Status        string    `json:"status"`       // e.g. "Started", "Pending_Leader_Approval", "Fulfilled", "Procuring"
+	AllocatedSN   string    `json:"allocated_sn"` // Serial Number once fulfilled
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+// Procurement backup order
+type ProcurementOrder struct {
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	RequestID    string    `json:"request_id"`
+	ItemName     string    `json:"item_name"`
+	ExpectedTime time.Time `json:"expected_time"`
+	Status       string    `json:"status"` // e.g. "Bidding", "Completed"
 }
 
 // Inventory item with serial number tracking
@@ -120,6 +155,27 @@ type RecordPaymentCommand struct {
 
 type ApproveTimesheetCommand struct {
 	TimesheetID string `json:"timesheet_id"`
+}
+
+type ResetPasswordCommand struct {
+	UserID      string `json:"user_id"`
+	NewPassword string `json:"new_password"`
+}
+
+type SubmitMaterialRequestCommand struct {
+	TaskID   string `json:"task_id"`
+	ItemName string `json:"item_name"`
+}
+
+type ApproveMaterialCommand struct {
+	RequestID string `json:"request_id"`
+}
+
+type CreateCustomerCommand struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+	Email string `json:"email"`
 }
 
 // CloudEvent standard payload structure as requested

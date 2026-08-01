@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -151,7 +152,9 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 			return
 		}
 
-		if msg.Subject() == "erp.finance.payment.cmd.record" {
+		subject := msg.Subject()
+		switch subject {
+		case "erp.finance.payment.cmd.record":
 			var cmd types.RecordPaymentCommand
 			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
 				msg.Term()
@@ -198,8 +201,18 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 			sdb.Log(tenantID, userID, "Payment_Reconciled", fmt.Sprintf("M-Pesa payment of KSh %.2f applied to invoice %s (Ref: %s). New invoice status: %s", cmd.Amount, updatedInv.ID, cmd.Reference, updatedInv.Status))
 
 			// Fast confirmation event trigger to customer
-			publishImmediateSMSConfirmation(js, tenantID, updatedInv.CustomerID, cmd.Amount, updatedInv.BalanceAmount)
+			publishImmediateSMSConfirmation(tenantID, updatedInv.CustomerID, cmd.Amount, updatedInv.BalanceAmount)
+			msg.Ack()
 
+		case "erp.customers.crm.cmd.create":
+			var cmd types.CreateCustomerCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			database.CreateCustomerTransaction(cmd.ID, tenantID, cmd.Name, cmd.Phone, cmd.Email)
+			sdb.Log(tenantID, userID, "CreateCustomer_Success", fmt.Sprintf("Customer %s registered under tenant %s", cmd.Name, tenantID))
 			msg.Ack()
 		}
 	})
@@ -219,7 +232,9 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			return
 		}
 
-		if msg.Subject() == "erp.tasks.timesheet.cmd.approve" {
+		subject := msg.Subject()
+		switch subject {
+		case "erp.tasks.timesheet.cmd.approve":
 			var cmd types.ApproveTimesheetCommand
 			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
 				msg.Term()
@@ -270,6 +285,53 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			log.Printf("TASKS: Timesheet %s successfully approved by superior %s under tenant %s", ts.ID, userID, tenantID)
 			sdb.Log(tenantID, userID, "ApproveTimesheet_Success", fmt.Sprintf("Approved timesheet %s for subordinate technician %s", cmd.TimesheetID, ts.UserID))
 			msg.Ack()
+
+		case "erp.users.auth.cmd.reset_password":
+			var cmd types.ResetPasswordCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			err := database.ResetPasswordTransaction(cmd.UserID, cmd.NewPassword)
+			if err != nil {
+				msg.Term()
+				return
+			}
+			sdb.Log(tenantID, userID, "ResetPassword_Success", fmt.Sprintf("Credential password reset for user %s executed in SQLite", cmd.UserID))
+			msg.Ack()
+
+		case "erp.tasks.materials.cmd.request":
+			var cmd types.SubmitMaterialRequestCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			reqID := "req_" + uuid.New().String()[:8]
+			database.CreateMaterialRequestTransaction(reqID, tenantID, cmd.TaskID, userID, cmd.ItemName)
+			sdb.Log(tenantID, userID, "MaterialRequest_Success", fmt.Sprintf("Technician material request %s logged", reqID))
+			msg.Ack()
+
+		case "erp.tasks.materials.cmd.approve":
+			var cmd types.ApproveMaterialCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			updatedReq, procOrder, err := database.ApproveMaterialRequestTransaction(cmd.RequestID, tenantID, userID)
+			if err != nil {
+				msg.Term()
+				return
+			}
+
+			if procOrder != nil {
+				sdb.Log(tenantID, userID, "MaterialApproval_ProcurementEscalation", fmt.Sprintf("Material %s out of stock. Requisition escalated to Procurement order %s", updatedReq.ItemName, procOrder.ID))
+			} else {
+				sdb.Log(tenantID, userID, "MaterialApproval_Fulfilled", fmt.Sprintf("Material approved and serial asset %s issued automatically", updatedReq.AllocatedSN))
+			}
+			msg.Ack()
 		}
 	})
 	if err != nil {
@@ -277,7 +339,7 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 	}
 }
 
-func publishImmediateSMSConfirmation(js jetstream.JetStream, tenantID, customerID string, amount float64, balance float64) {
+func publishImmediateSMSConfirmation(tenantID, customerID string, amount float64, balance float64) {
 	log.Printf("[SMS GATEWAY ALERT] Sending SMS to Customer %s for Tenant %s: 'KSh %.2f received. Current Outstanding Balance: KSh %.2f. Service activated.'",
 		customerID, tenantID, amount, balance)
 }
