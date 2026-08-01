@@ -15,27 +15,22 @@ import (
 	"erp-event-bus/consumer"
 	"erp-event-bus/db"
 	"erp-event-bus/handler"
+	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
 )
 
 func main() {
-	// 1. Initialize NATS server connection
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = nats.DefaultURL
-	}
-
-	nc, err := nats.Connect(natsURL, nats.Timeout(10*time.Second))
+	bus, err := eventbus.Start()
 	if err != nil {
-		log.Fatalf("Failed to connect to NATS server: %v", err)
+		log.Fatalf("failed to start embedded event bus: %v", err)
 	}
-	defer nc.Close()
+	defer func() {
+		_ = bus.Conn.Drain()
+		bus.Server.Shutdown()
+	}()
 
-	// 2. Setup JetStream Stream Topology (and create stream "SALES" if missing)
-	js, err := nc.JetStream()
-	if err != nil {
-		log.Fatalf("Failed to retrieve JetStream context: %v", err)
-	}
+	nc := bus.Conn
+	js := bus.JS
 
 	// Setup Multi-Tenant Streams: INVENTORY, FINANCE, TASKS
 	setupStream(js, "INVENTORY", "erp.inventory.>")

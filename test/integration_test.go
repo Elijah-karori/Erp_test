@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/nats-io/nats.go"
@@ -13,6 +12,7 @@ import (
 
 	"erp-event-bus/db"
 	"erp-event-bus/handler"
+	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
 )
 
@@ -75,16 +75,15 @@ func TestHierarchy_SubordinateTimesheetsApproval(t *testing.T) {
 }
 
 func TestMultiTenantIsolationFlow(t *testing.T) {
-	// Fallback/Connection integration verification with NATS
-	nc, err := nats.Connect(nats.DefaultURL, nats.Timeout(2*time.Second))
-	if err != nil {
-		t.Skip("NATS Server not running locally on default port 4222, skipping NATS client-based flow.")
-		return
-	}
-	defer nc.Close()
-
-	jsContext, err := nc.JetStream()
+	bus, err := eventbus.Start()
 	assert.NoError(t, err)
+	defer func() {
+		_ = bus.Conn.Drain()
+		bus.Server.Shutdown()
+	}()
+
+	nc := bus.Conn
+	jsContext := bus.JS
 
 	// Configure stream and consumer
 	_, err = jsContext.AddStream(&nats.StreamConfig{
