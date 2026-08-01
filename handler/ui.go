@@ -159,11 +159,11 @@ const htmlContent = `
         }
     </script>
 </head>
-<body class="bg-brand-900 text-slate-100 min-h-screen font-sans">
+<body class="bg-brand-900 text-slate-100 min-h-screen font-sans overflow-x-hidden">
 
     <!-- LOGIN / AUTHENTICATION GATE SCREEN -->
-    <div id="loginGate" class="min-h-screen flex items-center justify-center p-6 bg-brand-900">
-        <div class="max-w-md w-full bg-brand-500 rounded-2xl border border-brand-600 p-8 shadow-2xl space-y-6">
+    <div id="loginGate" class="min-h-screen flex items-center justify-center p-4 bg-brand-900">
+        <div class="max-w-md w-full bg-brand-500 rounded-2xl border border-brand-600 p-6 md:p-8 shadow-2xl space-y-6">
             <div class="text-center space-y-2">
                 <i class="fa-solid fa-network-wired text-emerald-400 text-5xl"></i>
                 <h2 class="text-2xl font-bold tracking-wide text-white">SME Kenya ERP Login</h2>
@@ -174,7 +174,6 @@ const htmlContent = `
                 <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">Select Active Profile</label>
                     <select id="loginUserSelect" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400">
-                        <!-- Filled dynamically from DB state -->
                     </select>
                 </div>
 
@@ -183,7 +182,6 @@ const htmlContent = `
                 </button>
             </div>
 
-            <!-- Fast registration panel -->
             <div class="border-t border-brand-600 pt-4 flex justify-between text-xs font-semibold text-emerald-400">
                 <button onclick="openRegisterTenantModal()" class="hover:underline">Register New Tenant</button>
                 <button onclick="openRegisterUserModal()" class="hover:underline">Create User Profile</button>
@@ -191,17 +189,38 @@ const htmlContent = `
         </div>
     </div>
 
-    <!-- MAIN CO-LOCATED ERP DASHBOARD VIEW (Initially Hidden) -->
-    <div id="dashboardApp" class="hidden flex min-h-screen">
+    <!-- MAIN CO-LOCATED ERP DASHBOARD VIEW -->
+    <div id="dashboardApp" class="hidden min-h-screen flex flex-col lg:flex-row">
 
-        <!-- Role-Based Sidebar Layout -->
-        <aside class="w-64 bg-brand-500 border-r border-brand-600 flex flex-col shadow-xl">
-            <!-- Brand summary header -->
-            <div class="px-6 py-5 border-b border-brand-600 flex items-center space-x-3 bg-brand-600">
-                <i class="fa-solid fa-cubes text-emerald-400 text-2xl"></i>
-                <div>
-                    <div id="sidebarTenantName" class="text-sm font-bold truncate max-w-[150px]">Safaricom ISP</div>
-                    <div class="text-[10px] text-slate-400 tracking-widest uppercase">Ecosystem</div>
+        <!-- MOBILE NAVIGATION HEADER (Visible on mobile/tablet, hidden on desktop) -->
+        <header class="lg:hidden bg-brand-500 border-b border-brand-600 px-4 py-4 flex items-center justify-between shadow-md sticky top-0 z-50">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-network-wired text-emerald-400 text-xl"></i>
+                <span id="mobileTenantTitle" class="text-md font-bold tracking-wide text-white truncate max-w-[150px]">SME Kenya ERP</span>
+            </div>
+
+            <div class="flex items-center space-x-3">
+                <div class="relative bg-brand-900 p-2 rounded-lg border border-brand-600 cursor-pointer" onclick="toggleNotificationPane()">
+                    <i class="fa-regular fa-bell text-slate-300 text-xs"></i>
+                    <span id="mobileNotifBadge" class="absolute top-0 right-0 w-2 h-2 bg-rose-500 rounded-full border border-brand-900 hidden"></span>
+                </div>
+                <button onclick="toggleMobileSidebar()" class="bg-brand-900 border border-brand-600 text-slate-200 p-2 rounded-lg hover:bg-brand-600 focus:outline-none">
+                    <i class="fa-solid fa-bars text-lg" id="hamburgerIcon"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Role-Based Responsive Sidebar (Floating Drawer on mobile/tablet, pinned column on desktop) -->
+        <aside id="sidebarDrawer" class="hidden lg:flex w-full lg:w-64 bg-brand-500 border-r border-brand-600 flex-col shadow-xl shrink-0 fixed lg:static inset-y-0 left-0 z-40 lg:z-auto transition-transform duration-300 transform lg:transform-none">
+
+            <!-- Brand summary header (Hidden on mobile) -->
+            <div class="hidden lg:flex px-6 py-5 border-b border-brand-600 items-center justify-between bg-brand-600">
+                <div class="flex items-center space-x-3">
+                    <i class="fa-solid fa-cubes text-emerald-400 text-2xl"></i>
+                    <div>
+                        <div id="sidebarTenantName" class="text-sm font-bold truncate max-w-[150px]">Safaricom ISP</div>
+                        <div class="text-[10px] text-slate-400 tracking-widest uppercase">Ecosystem</div>
+                    </div>
                 </div>
             </div>
 
@@ -252,13 +271,12 @@ const htmlContent = `
         <!-- Dynamic Module view layout panel -->
         <div class="flex-1 flex flex-col min-w-0 bg-brand-900 overflow-y-auto">
 
-            <!-- Dashboard Top Action Headers -->
-            <header class="bg-brand-500 border-b border-brand-600 px-8 py-4 flex items-center justify-between shadow-sm">
+            <!-- Dashboard Top Action Headers (Visible only on desktop) -->
+            <header class="hidden lg:flex bg-brand-500 border-b border-brand-600 px-8 py-4 items-center justify-between shadow-sm">
                 <div>
                     <h2 id="currentModuleTitle" class="text-lg font-bold text-white">Dashboard Home</h2>
                     <p class="text-xs text-slate-400">Live Kenya-SME enterprise state</p>
                 </div>
-                <!-- Dynamic Quick Notification Alert Panel inside Header -->
                 <div class="flex items-center space-x-4">
                     <div class="relative bg-brand-900 p-2.5 rounded-lg border border-brand-600 cursor-pointer" onclick="toggleNotificationPane()">
                         <i class="fa-regular fa-bell text-slate-300 text-sm"></i>
@@ -268,7 +286,7 @@ const htmlContent = `
             </header>
 
             <!-- Notification Drawer Pane -->
-            <div id="notifPane" class="hidden mx-8 mt-4 p-4 bg-brand-500 rounded-xl border border-brand-600 shadow-lg space-y-3">
+            <div id="notifPane" class="hidden mx-4 lg:mx-8 mt-4 p-4 bg-brand-500 rounded-xl border border-brand-600 shadow-lg space-y-3">
                 <h4 class="text-xs uppercase font-bold text-slate-400 flex items-center justify-between">
                     <span>Recent Broadcast Alerts</span>
                     <button onclick="clearNotifications()" class="text-[10px] text-rose-400 hover:underline">Clear All</button>
@@ -279,9 +297,7 @@ const htmlContent = `
             </div>
 
             <!-- Workspace Panels -->
-            <div class="p-8 max-w-6xl w-full mx-auto space-y-6">
-
-                <!-- MAIN INTERACTIVE MODULES VIEWS -->
+            <div class="p-4 md:p-8 max-w-6xl w-full mx-auto space-y-6">
 
                 <!-- Module A: Dashboard View -->
                 <div id="view_dashboard" class="space-y-6">
@@ -314,8 +330,8 @@ const htmlContent = `
                     </div>
 
                     <!-- Layout sidebars previewing recent SQLite compliance log -->
-                    <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
-                        <div class="md:col-span-8 bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <div class="lg:col-span-8 bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
                             <h3 class="font-bold text-lg text-emerald-300 mb-2 flex items-center space-x-2">
                                 <i class="fa-solid fa-shield-halved"></i>
                                 <span>Policy Shield Verification Activity</span>
@@ -325,7 +341,7 @@ const htmlContent = `
                                 <i class="fa-solid fa-download mr-1"></i> Export Live SQLite Log to Excel
                             </a>
                         </div>
-                        <div class="md:col-span-4 bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md flex flex-col h-[280px]">
+                        <div class="lg:col-span-4 bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md flex flex-col h-[280px]">
                             <h4 class="font-bold text-xs uppercase text-slate-400 mb-3 tracking-wider">System Live Audit Log</h4>
                             <div id="miniSqliteLogs" class="flex-1 overflow-y-auto space-y-2 pr-1 font-mono text-[10px] text-slate-300">
                             </div>
@@ -335,7 +351,7 @@ const htmlContent = `
 
                 <!-- Module B: Inventory View -->
                 <div id="view_inventory" class="hidden space-y-6">
-                    <div id="inventorySection" class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                    <div id="inventorySection" class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-bold text-lg flex items-center space-x-2">
                                 <i class="fa-solid fa-boxes-stacked text-emerald-400"></i>
@@ -360,8 +376,8 @@ const htmlContent = `
                             </div>
                         </form>
 
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left text-sm">
+                        <div class="overflow-x-auto w-full max-w-full block">
+                            <table class="w-full text-left text-sm min-w-[600px]">
                                 <thead>
                                     <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
                                         <th class="py-3 px-4">Item ID</th>
@@ -381,7 +397,7 @@ const htmlContent = `
 
                 <!-- Module C: Finance View -->
                 <div id="view_finance" class="hidden space-y-6">
-                    <div id="financeSection" class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                    <div id="financeSection" class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-bold text-lg flex items-center space-x-2">
                                 <i class="fa-solid fa-file-invoice-dollar text-amber-400"></i>
@@ -411,8 +427,8 @@ const htmlContent = `
                             </div>
                         </form>
 
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left text-sm">
+                        <div class="overflow-x-auto w-full max-w-full block">
+                            <table class="w-full text-left text-sm min-w-[600px]">
                                 <thead>
                                     <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
                                         <th class="py-3 px-4">Invoice ID</th>
@@ -431,7 +447,7 @@ const htmlContent = `
 
                 <!-- Module D: Tasks/Timesheets View -->
                 <div id="view_tasks" class="hidden space-y-6">
-                    <div id="tasksSection" class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                    <div id="tasksSection" class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-bold text-lg flex items-center space-x-2">
                                 <i class="fa-solid fa-list-check text-sky-400"></i>
@@ -440,8 +456,8 @@ const htmlContent = `
                             <span id="tasksHeaderBadge" class="text-xs text-slate-400 uppercase tracking-widest">HIERARCHICAL APPROVALS</span>
                         </div>
 
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-left text-sm">
+                        <div class="overflow-x-auto w-full max-w-full block">
+                            <table class="w-full text-left text-sm min-w-[600px]">
                                 <thead>
                                     <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
                                         <th class="py-3 px-4">Timesheet ID</th>
@@ -462,7 +478,7 @@ const htmlContent = `
 
                 <!-- Module E: RBAC Policy View -->
                 <div id="view_rbac" class="hidden space-y-6">
-                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm">
+                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
                         <div class="flex items-center justify-between mb-4 border-b border-brand-600 pb-3">
                             <h3 class="font-bold text-lg flex items-center space-x-2 text-emerald-400">
                                 <i class="fa-solid fa-shield-halved"></i>
@@ -482,16 +498,16 @@ const htmlContent = `
     </div>
 
     <!-- REGISTER TENANT MODAL -->
-    <div id="registerTenantModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4">
+    <div id="registerTenantModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
         <div class="bg-brand-500 rounded-2xl border border-brand-600 p-6 max-w-sm w-full space-y-4">
             <h4 class="font-bold text-md text-emerald-300">Register New Tenant Subscriber</h4>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Tenant ID (Unique Key)</label>
-                <input type="text" id="regTenantId" placeholder="tenant_pioneer_isp" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <input type="text" id="regTenantId" placeholder="tenant_pioneer_isp" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Tenant Enterprise Name</label>
-                <input type="text" id="regTenantName" placeholder="Pioneer ISP Tech Services" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <input type="text" id="regTenantName" placeholder="Pioneer ISP Tech Services" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div class="flex space-x-2 pt-2 justify-end">
                 <button onclick="closeRegisterTenantModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
@@ -505,26 +521,25 @@ const htmlContent = `
     </div>
 
     <!-- REGISTER USER MODAL -->
-    <div id="registerUserModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4">
+    <div id="registerUserModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
         <div class="bg-brand-500 rounded-2xl border border-brand-600 p-6 max-w-sm w-full space-y-4">
             <h4 class="font-bold text-md text-emerald-300">Create New User Profile</h4>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">User ID</label>
-                <input type="text" id="regUserId" placeholder="usr_karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <input type="text" id="regUserId" placeholder="usr_karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Full Name</label>
-                <input type="text" id="regUserName" placeholder="David Karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <input type="text" id="regUserName" placeholder="David Karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Select Tenant</label>
-                <select id="regUserTenantSelect" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
-                    <!-- filled dynamically -->
+                <select id="regUserTenantSelect" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
                 </select>
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Assign Role</label>
-                <select id="regUserRoleSelect" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <select id="regUserRoleSelect" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
                     <option value="tenant_admin">tenant_admin (Alice level)</option>
                     <option value="manager">manager (Bob level)</option>
                     <option value="finance_officer">finance_officer (Eva level)</option>
@@ -533,7 +548,7 @@ const htmlContent = `
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Working Region</label>
-                <input type="text" id="regUserRegion" placeholder="Mombasa" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <input type="text" id="regUserRegion" placeholder="Mombasa" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div class="flex space-x-2 pt-2 justify-end">
                 <button onclick="closeRegisterUserModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
@@ -547,16 +562,16 @@ const htmlContent = `
     </div>
 
     <!-- ALLOCATION MODAL -->
-    <div id="allocationModal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4">
+    <div id="allocationModal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50">
         <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 max-w-sm w-full space-y-4">
             <h4 class="font-bold text-md text-emerald-300">Allocate Device to Technician</h4>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Item ID</label>
-                <input type="text" id="modalItemId" readonly class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-400">
+                <input type="text" id="modalItemId" readonly class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-400 focus:outline-none">
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Select Technician</label>
-                <select id="modalTechId" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200">
+                <select id="modalTechId" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
                 </select>
             </div>
             <div class="flex space-x-2 pt-2 justify-end">
@@ -576,9 +591,9 @@ const htmlContent = `
         let activeView = 'dashboard';
         let loggedIn = false;
         let recentNotifications = [];
+        let mobileSidebarOpen = false;
 
         async function initAuth() {
-            // Load state silently to fill dropdowns first
             try {
                 const res = await fetch('/api/state', {
                     headers: { 'Authorization-Tenant-Id': 'tenant_safari', 'Authorization-User-Id': 'usr_safari_admin', 'Authorization-Roles': 'tenant_admin', 'Authorization-Region': 'Nairobi' }
@@ -586,7 +601,6 @@ const htmlContent = `
                 const data = await res.json();
                 currentState = data;
 
-                // Fill dropdown users list for login panel
                 const loginSelect = document.getElementById('loginUserSelect');
                 loginSelect.innerHTML = '';
 
@@ -631,9 +645,11 @@ const htmlContent = `
             document.getElementById('sidebarAvatar').innerText = u.name.charAt(0);
 
             const tenantObj = currentState.tenants[u.tenant_id];
-            document.getElementById('sidebarTenantName').innerText = tenantObj ? tenantObj.name : u.tenant_id;
+            const tenantNameStr = tenantObj ? tenantObj.name : u.tenant_id;
+            document.getElementById('sidebarTenantName').innerText = tenantNameStr;
+            document.getElementById('mobileTenantTitle').innerText = tenantNameStr;
 
-            pushNotification('SESSION_LOGGED_IN', 'User ' + u.name + ' entered the ' + (tenantObj ? tenantObj.name : u.tenant_id) + ' workspace.');
+            pushNotification('SESSION_LOGGED_IN', 'User ' + u.name + ' entered the ' + tenantNameStr + ' workspace.');
 
             switchModuleView('dashboard');
             fetchState();
@@ -644,7 +660,32 @@ const htmlContent = `
             loggedIn = false;
             document.getElementById('dashboardApp').classList.add('hidden');
             document.getElementById('loginGate').classList.remove('hidden');
+            closeMobileSidebar();
             initAuth();
+        }
+
+        // Toggle mobile responsive sidebar
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('sidebarDrawer');
+            const icon = document.getElementById('hamburgerIcon');
+
+            if (mobileSidebarOpen) {
+                sidebar.classList.add('hidden');
+                sidebar.classList.remove('flex', 'absolute', 'w-64', 'h-screen');
+                icon.className = 'fa-solid fa-bars text-lg';
+                mobileSidebarOpen = false;
+            } else {
+                sidebar.classList.remove('hidden');
+                sidebar.classList.add('flex', 'absolute', 'w-64', 'h-screen');
+                icon.className = 'fa-solid fa-xmark text-lg';
+                mobileSidebarOpen = true;
+            }
+        }
+
+        function closeMobileSidebar() {
+            if (mobileSidebarOpen) {
+                toggleMobileSidebar();
+            }
         }
 
         function switchModuleView(viewName) {
@@ -675,6 +716,7 @@ const htmlContent = `
             else if (viewName === 'rbac') title = 'RBAC Policy Engine';
 
             document.getElementById('currentModuleTitle').innerHTML = title;
+            closeMobileSidebar();
         }
 
         function pushNotification(type, message) {
@@ -687,6 +729,7 @@ const htmlContent = `
 
             // Toggle badge alert
             document.getElementById('notifBadge').classList.remove('hidden');
+            document.getElementById('mobileNotifBadge').classList.remove('hidden');
             renderNotifications();
         }
 
@@ -694,6 +737,7 @@ const htmlContent = `
             const pane = document.getElementById('notifPane');
             pane.classList.toggle('hidden');
             document.getElementById('notifBadge').classList.add('hidden');
+            document.getElementById('mobileNotifBadge').classList.add('hidden');
         }
 
         function clearNotifications() {
@@ -754,7 +798,6 @@ const htmlContent = `
         }
 
         function openRegisterUserModal() {
-            // Fill tenant options
             const sel = document.getElementById('regUserTenantSelect');
             sel.innerHTML = '';
             Object.values(currentState.tenants || {}).forEach(t => {
@@ -848,7 +891,6 @@ const htmlContent = `
                 return;
             }
 
-            // Calculate list of checked permissions for this role
             const grid = document.getElementById('policyConfigGrid');
             const checkboxes = grid.querySelectorAll('input[data-role="' + roleName + '"]:checked');
             const newPerms = [];
@@ -917,8 +959,6 @@ const htmlContent = `
 
                     const label = document.createElement('label');
                     label.className = 'flex items-center space-x-2 text-[11px] text-slate-300 cursor-pointer hover:text-slate-100';
-
-                    // Disable inputs if not TenantAdmin to lock control visually
                     const disabledStr = activeRole === 'tenant_admin' ? '' : 'disabled';
 
                     label.innerHTML = '<input type="checkbox" value="' + perm + '" data-role="' + roleName + '" ' + isChecked + ' ' + disabledStr + ' onchange="togglePermission(\'' + roleName + '\', \'' + perm + '\', this)" class="rounded bg-brand-500 border-brand-600 text-emerald-500 focus:ring-emerald-500"> ' +
@@ -938,7 +978,6 @@ const htmlContent = `
             const invBody = document.getElementById('inventoryTableBody');
             invBody.innerHTML = '';
 
-            // ABAC: Check inventory clearance view bounds
             const activeRolePermissions = currentState.roles[activeRole] || [];
             const canViewInventory = activeRolePermissions.includes('inventory:read') || activeRolePermissions.includes('inventory:*') || activeRolePermissions.includes('*');
             const canWriteInventory = activeRolePermissions.includes('inventory:write') || activeRolePermissions.includes('inventory:*') || activeRolePermissions.includes('*');
@@ -946,7 +985,6 @@ const htmlContent = `
             const invSection = document.getElementById('inventorySection');
             const createItemForm = document.getElementById('createItemForm');
 
-            // Dynamic RBAC Action Views mapping
             if (!canViewInventory) {
                 invSection.classList.add('opacity-50');
                 document.getElementById('inventoryHeaderBadge').innerHTML = '<span class="text-rose-400 font-bold">ACCESS DENIED</span>';
@@ -956,7 +994,6 @@ const htmlContent = `
                 document.getElementById('inventoryHeaderBadge').innerText = 'STRICT SERIAL CONTROL';
             }
 
-            // Disable or enable Create form visually
             if (!canWriteInventory) {
                 createItemForm.classList.add('opacity-40', 'pointer-events-none');
                 document.getElementById('createItemBtn').disabled = true;
@@ -975,7 +1012,6 @@ const htmlContent = `
                     const statusColor = item.status === 'In_Stock' ? 'text-emerald-400 font-semibold' : 'text-sky-400';
                     const allocText = item.assigned_to ? item.assigned_to : '<span class=\'text-slate-500\'>Unassigned</span>';
 
-                    // Button disabled bounds
                     const assignBtn = item.status === 'In_Stock'
                         ? '<button onclick="openAllocationModal(\'' + item.id + '\')" ' + (canWriteInventory ? '' : 'disabled') + ' class="text-xs bg-brand-900 text-emerald-400 hover:bg-brand-500 border border-brand-600 rounded py-1 px-2 font-bold transition disabled:opacity-40">Allocate</button>'
                         : '<span class="text-xs text-slate-500">Allocated</span>';
