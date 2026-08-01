@@ -32,15 +32,15 @@ func main() {
 	nc := bus.Conn
 	js := bus.JS
 
-	// Setup Multi-Tenant Streams: INVENTORY, FINANCE, TASKS
-	setupStream(js, "INVENTORY", "erp.inventory.>")
-	setupStream(js, "FINANCE", "erp.finance.>")
-	setupStream(js, "TASKS", "erp.tasks.>")
+	// Setup Multi-Tenant Streams with multiple subjects support
+	setupStream(js, "INVENTORY", []string{"erp.inventory.>"})
+	setupStream(js, "FINANCE", []string{"erp.finance.>", "erp.customers.>"})
+	setupStream(js, "TASKS", []string{"erp.tasks.>", "erp.users.>"})
 
-	// Setup Durable Consumers
-	setupConsumer(js, "INVENTORY", "InventoryWorker", "erp.inventory.item.cmd.>")
-	setupConsumer(js, "FINANCE", "FinanceWorker", "erp.finance.payment.cmd.>")
-	setupConsumer(js, "TASKS", "TaskTimesheetWorker", "erp.tasks.timesheet.cmd.>")
+	// Setup Durable Consumers with wildcards matching the expanded subjects
+	setupConsumer(js, "INVENTORY", "InventoryWorker", "erp.inventory.>")
+	setupConsumer(js, "FINANCE", "FinanceWorker", "erp.>") // Matches all finance and customer events
+	setupConsumer(js, "TASKS", "TaskTimesheetWorker", "erp.>") // Matches all tasks and users events
 
 	// 4. Initialize SQLite Persistent Log Database
 	sqliteDB, err := db.InitSQLite("erp.db")
@@ -89,6 +89,10 @@ func main() {
 
 	// Tasks Endpoints:
 	api.POST("/tasks/timesheets/approve", h.ApproveTimesheetHandler, middleware.ModuleClearanceMiddleware(database, "timesheets:approve"))
+	api.POST("/tasks/materials/request", h.SubmitMaterialRequestHandler, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
+	api.POST("/tasks/materials/approve", h.ApproveMaterialHandler, middleware.ModuleClearanceMiddleware(database, "tasks:approve"))
+	api.POST("/customers", h.CreateCustomerHandler, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/users/reset-password", h.ResetPasswordHandler, middleware.ModuleClearanceMiddleware(database, "users:*"))
 
 	// 7. Start server gracefully
 	go func() {
@@ -111,13 +115,13 @@ func main() {
 	}
 }
 
-func setupStream(js nats.JetStreamContext, streamName, streamSubject string) {
+func setupStream(js nats.JetStreamContext, streamName string, streamSubjects []string) {
 	_, err := js.StreamInfo(streamName)
 	if err != nil {
 		log.Printf("Stream %s not found, creating: %v", streamName, err)
 		_, err = js.AddStream(&nats.StreamConfig{
 			Name:     streamName,
-			Subjects: []string{streamSubject},
+			Subjects: streamSubjects,
 			Storage:  nats.FileStorage,
 		})
 		if err != nil {
