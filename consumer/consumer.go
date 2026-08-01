@@ -50,7 +50,7 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 
 // consumeInventory handles serialized creation and assignment
 func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
-	_, _ = cons.Consume(func(msg jetstream.Msg) {
+	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
 		userRoles := msg.Headers().Get(types.HeaderUserRoles)
@@ -132,11 +132,14 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			msg.Term()
 		}
 	})
+	if err != nil {
+		log.Printf("INVENTORY Consumer Error: %v", err)
+	}
 }
 
 // consumeFinance handles partial payments, billing and credit limit allocations
 func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
-	_, _ = cons.Consume(func(msg jetstream.Msg) {
+	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
 
@@ -199,11 +202,14 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 			msg.Ack()
 		}
 	})
+	if err != nil {
+		log.Printf("FINANCE Consumer Error: %v", err)
+	}
 }
 
 // consumeTasks resolves timesheet submissions based on user/role superiors checks
 func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
-	_, _ = cons.Consume(func(msg jetstream.Msg) {
+	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
 
@@ -262,6 +268,9 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			msg.Ack()
 		}
 	})
+	if err != nil {
+		log.Printf("TASKS Consumer Error: %v", err)
+	}
 }
 
 func publishImmediateSMSConfirmation(js jetstream.JetStream, tenantID, customerID string, amount float64, balance float64) {

@@ -78,6 +78,7 @@ func main() {
 	// State and live log endpoints for UI rendering
 	api.GET("/state", uiHandler.GetState)
 	api.GET("/logs", uiHandler.GetLogs)
+	api.POST("/rbac/update", uiHandler.UpdateRBAC, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	e.GET("/api/exports/excel", uiHandler.ExportLogsExcel) // Export route direct download
 
 	h := handler.NewERPHandler(nc, js, sqliteDB)
