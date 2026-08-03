@@ -11,6 +11,22 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://erp_app:postgres@localhost:5432/erp_db?sslmode=disable
+
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -19,6 +35,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.5'
+
+      - name: Create database user and run migrations
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE ROLE erp_app WITH LOGIN PASSWORD 'postgres' SUPERUSER;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE erp_db OWNER erp_app;"
+          PGPASSWORD=postgres psql -h localhost -U erp_app -d erp_db -f supabase/schema.sql
 
       - name: Install dependencies
         run: go mod download
