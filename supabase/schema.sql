@@ -223,3 +223,19 @@ create policy tenant_isolation on erp_logs          using (tenant_id = current_s
 -- create role erp_app login password '...';
 -- grant usage on schema public to erp_app;
 -- grant select, insert, update, delete on all tables in schema public to erp_app;
+
+-- ============================================================
+-- INVENTORY HISTORY (Task 3)
+-- ============================================================
+create table inventory_history (
+    id         bigint generated always as identity primary key,
+    tenant_id  text not null references tenants(id) on delete cascade,
+    item_id    text not null,
+    from_status text not null,
+    to_status   text not null,
+    changed_by  text not null,
+    changed_at  timestamptz not null default now()
+);
+create index idx_inventory_history_tenant on inventory_history(tenant_id);
+alter table inventory_history enable row level security;
+create policy tenant_isolation on inventory_history using (tenant_id = current_setting('app.current_tenant_id', true));
