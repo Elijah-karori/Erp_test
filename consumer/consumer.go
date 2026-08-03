@@ -25,7 +25,7 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	// 1. INVENTORY Consumer: Creating serialized assets & allocating to technicians
 	invCons, err := js.Consumer(ctx, "INVENTORY", "InventoryWorker")
 	if err == nil {
-		go consumeInventory(invCons, js, database, sdb)
+		go consumeInventory(invCons, js, database, sdb, nc)
 	} else {
 		log.Printf("Warning: Inventory consumer binding skipped: %v", err)
 	}
@@ -33,7 +33,7 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	// 2. FINANCE Consumer: M-Pesa billing and credit management
 	finCons, err := js.Consumer(ctx, "FINANCE", "FinanceWorker")
 	if err == nil {
-		go consumeFinance(finCons, js, database, sdb)
+		go consumeFinance(finCons, js, database, sdb, nc)
 	} else {
 		log.Printf("Warning: Finance consumer binding skipped: %v", err)
 	}
@@ -41,7 +41,7 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	// 3. TASKS Consumer: Technician timesheets with hierarchical approvals
 	taskCons, err := js.Consumer(ctx, "TASKS", "TaskTimesheetWorker")
 	if err == nil {
-		go consumeTasks(taskCons, js, database, sdb)
+		go consumeTasks(taskCons, js, database, sdb, nc)
 	} else {
 		log.Printf("Warning: Tasks consumer binding skipped: %v", err)
 	}
@@ -49,8 +49,22 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	return nil
 }
 
+func publishSecurityAlert(nc *nats.Conn, tenantID, userID, reason, violation string) {
+	alert := types.AuditAlert{
+		UserID:    userID,
+		Reason:    reason,
+		Violation: violation,
+	}
+	payload, _ := json.Marshal(alert)
+	msg := nats.NewMsg("erp.security.audit.v1.failed_access")
+	msg.Header.Set(types.HeaderTenantID, tenantID)
+	msg.Header.Set(types.HeaderUserID, userID)
+	msg.Data = payload
+	_ = nc.PublishMsg(msg)
+}
+
 // consumeInventory handles serialized creation and assignment
-func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
+func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB, nc *nats.Conn) {
 	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
@@ -74,18 +88,20 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			// ABAC: Check write permission
 			if !database.CheckPermission(tenantID, userRoles, "inventory:write") && !database.CheckPermission(tenantID, userRoles, "*") {
 				log.Printf("INVENTORY ABAC: User %s lacks create permission", userID)
+				publishSecurityAlert(nc, tenantID, userID, "UnprivilegedInventoryCreation", "User lacks inventory:write privilege")
 				msg.Term()
 				return
 			}
 
 			itemID := "item_" + cmd.SerialNumber
 			database.SaveInventoryItem(&types.InventoryItem{
-				ID:           itemID,
-				TenantID:     tenantID,
-				Name:         cmd.Name,
-				SerialNumber: cmd.SerialNumber,
-				Status:       "In_Stock",
-				Region:       msg.Headers().Get(types.HeaderUserRegion),
+				ID:               itemID,
+				TenantID:         tenantID,
+				Name:             cmd.Name,
+				SerialNumber:     cmd.SerialNumber,
+				Status:           "In_Stock",
+				Region:           msg.Headers().Get(types.HeaderUserRegion),
+				ReorderThreshold: cmd.ReorderThreshold,
 			})
 			log.Printf("INVENTORY: Created serialized item %s under Tenant %s", itemID, tenantID)
 			sdb.Log(tenantID, userID, "CreateItem_Success", fmt.Sprintf("Asset %s (SN: %s) created in SQLite", cmd.Name, cmd.SerialNumber))
@@ -108,6 +124,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			if item.TenantID != tenantID {
 				log.Printf("SECURITY ATTACK: Tenant mismatch! User %s tried to touch another tenant's item", userID)
 				sdb.Log(tenantID, userID, "SecurityViolation_CrossTenant", fmt.Sprintf("User tried to assign cross-tenant item %s", cmd.ItemID))
+				publishSecurityAlert(nc, tenantID, userID, "CrossTenantInventoryAccess", fmt.Sprintf("User tried to assign cross-tenant item %s", cmd.ItemID))
 				msg.Term()
 				return
 			}
@@ -116,6 +133,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			tech, err := database.GetUser(cmd.UserID)
 			if err != nil || tech.TenantID != tenantID {
 				log.Printf("INVENTORY ABAC: User %s tried to assign to invalid user %s", userID, cmd.UserID)
+				publishSecurityAlert(nc, tenantID, userID, "InvalidAllocationTarget", fmt.Sprintf("User tried to assign item to non-existent or cross-tenant technician %s", cmd.UserID))
 				msg.Term()
 				return
 			}
@@ -142,7 +160,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 }
 
 // consumeFinance handles partial payments, billing and credit limit allocations
-func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
+func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB, nc *nats.Conn) {
 	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
@@ -170,6 +188,7 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 			// Multi-tenant check
 			if inv.TenantID != tenantID {
 				log.Printf("FINANCE ABAC: Multi-tenant boundary breach attempted by User %s", userID)
+				publishSecurityAlert(nc, tenantID, userID, "CrossTenantFinanceAccess", fmt.Sprintf("User tried to record payment on cross-tenant invoice %s", cmd.InvoiceID))
 				msg.Term()
 				return
 			}
@@ -222,7 +241,7 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 }
 
 // consumeTasks resolves timesheet submissions based on user/role superiors checks
-func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
+func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB, nc *nats.Conn) {
 	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
@@ -271,6 +290,23 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 				log.Printf("SECURITY VIOLATION: Role %s attempted to approve timesheet of peer/superior role %s without authority",
 					approver.RoleName, subordinate.RoleName)
 				sdb.Log(tenantID, userID, "SecurityViolation_Hierarchy", fmt.Sprintf("User tried to approve timesheet %s without authority", cmd.TimesheetID))
+				publishSecurityAlert(nc, tenantID, userID, "HierarchyViolation", fmt.Sprintf("Approver role %s is not superior to subordinate role %s", approver.RoleName, subordinate.RoleName))
+				msg.Term()
+				return
+			}
+
+			// Regional validation check: Approver region must match task region
+			task, err := database.GetTask(ts.TaskID)
+			if err != nil {
+				msg.Term()
+				return
+			}
+
+			if task.Region != approver.Region {
+				log.Printf("SECURITY VIOLATION: Approver %s (region %s) tried to approve timesheet for task in region %s",
+					approver.ID, approver.Region, task.Region)
+				sdb.Log(tenantID, userID, "SecurityViolation_RegionMismatch", fmt.Sprintf("User tried to approve timesheet %s for task in another region", cmd.TimesheetID))
+				publishSecurityAlert(nc, tenantID, userID, "RegionMismatchViolation", fmt.Sprintf("Approver region %s does not match task region %s", approver.Region, task.Region))
 				msg.Term()
 				return
 			}
@@ -331,6 +367,82 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			} else {
 				sdb.Log(tenantID, userID, "MaterialApproval_Fulfilled", fmt.Sprintf("Material approved and serial asset %s issued automatically", updatedReq.AllocatedSN))
 			}
+			msg.Ack()
+
+		case "erp.tasks.task.cmd.create":
+			var cmd types.CreateTaskCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			// ABAC: Check write permission (tasks:create)
+			userRoles := msg.Headers().Get(types.HeaderUserRoles)
+			if !database.CheckPermission(tenantID, userRoles, "tasks:create") && !database.CheckPermission(tenantID, userRoles, "tasks:*") && !database.CheckPermission(tenantID, userRoles, "*") {
+				log.Printf("TASKS ABAC: User %s lacks tasks:create permission", userID)
+				publishSecurityAlert(nc, tenantID, userID, "UnprivilegedTaskCreation", "User lacks tasks:create privilege")
+				msg.Term()
+				return
+			}
+
+			assigner, err := database.GetUser(userID)
+			if err != nil {
+				msg.Term()
+				return
+			}
+
+			database.SaveTask(&types.Task{
+				ID:         cmd.ID,
+				TenantID:   tenantID,
+				Title:      cmd.Title,
+				AssignedTo: cmd.AssignedTo,
+				CreatedBy:  userID,
+				Status:     "Pending",
+				Region:     assigner.Region,
+				DueDate:    cmd.DueDate,
+				DependsOn:  cmd.DependsOn,
+			})
+			log.Printf("TASKS: Created task %s under Tenant %s", cmd.ID, tenantID)
+			sdb.Log(tenantID, userID, "CreateTask_Success", fmt.Sprintf("Task %s created in SQLite", cmd.Title))
+			msg.Ack()
+
+		case "erp.tasks.task.cmd.update_status":
+			var cmd types.UpdateTaskStatusCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			task, err := database.GetTask(cmd.TaskID)
+			if err != nil {
+				msg.Term()
+				return
+			}
+
+			if task.TenantID != tenantID {
+				publishSecurityAlert(nc, tenantID, userID, "CrossTenantAttack", fmt.Sprintf("User tried to modify cross-tenant task %s", cmd.TaskID))
+				msg.Term()
+				return
+			}
+
+			// Enforce depends_on check if transitioning to In_Progress
+			if cmd.Status == "In_Progress" && task.DependsOn != "" {
+				depTask, err := database.GetTask(task.DependsOn)
+				if err == nil && depTask != nil {
+					if depTask.Status != "Completed" && depTask.Status != "Approved" {
+						log.Printf("TASKS ABAC: Task %s depends on %s which is not Completed/Approved (current: %s)", cmd.TaskID, task.DependsOn, depTask.Status)
+						sdb.Log(tenantID, userID, "SecurityViolation_TaskDependency", fmt.Sprintf("Attempted to start task %s before dependency %s is completed", cmd.TaskID, task.DependsOn))
+						publishSecurityAlert(nc, tenantID, userID, "TaskDependencyViolation", fmt.Sprintf("Task %s depends on unfinished task %s", cmd.TaskID, task.DependsOn))
+						msg.Term()
+						return
+					}
+				}
+			}
+
+			task.Status = cmd.Status
+			database.SaveTask(task)
+			log.Printf("TASKS: Updated task %s status to %s", task.ID, cmd.Status)
+			sdb.Log(tenantID, userID, "UpdateTaskStatus_Success", fmt.Sprintf("Updated task %s status to %s", task.ID, cmd.Status))
 			msg.Ack()
 		}
 	})
