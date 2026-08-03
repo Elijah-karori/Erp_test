@@ -670,6 +670,37 @@ func (d *Database) ApproveTimesheetTransaction(id string, approvedBy string) err
 	})
 }
 
+func (d *Database) CheckAndTriggerReorder(tenantID string, itemName string) {
+	ctx := context.Background()
+	_ = d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var inStockCount int
+		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM inventory_items WHERE tenant_id = $1 AND name = $2 AND status = 'In_Stock'", tenantID, itemName).Scan(&inStockCount)
+		if err != nil {
+			return err
+		}
+
+		// Let's get the max reorder_threshold for this item name under this tenant
+		var threshold int
+		err = tx.QueryRow(ctx, "SELECT COALESCE(MAX(reorder_threshold), 0) FROM inventory_items WHERE tenant_id = $1 AND name = $2", tenantID, itemName).Scan(&threshold)
+		if err != nil {
+			return err
+		}
+
+		if inStockCount <= threshold {
+			var exists bool
+			_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM procurement_orders WHERE tenant_id = $1 AND item_name = $2 AND status = 'Bidding')", tenantID, itemName).Scan(&exists)
+			if !exists {
+				procID := "proc_auto_" + uuid.New().String()[:8]
+				_, _ = tx.Exec(ctx, `
+					INSERT INTO procurement_orders (id, tenant_id, request_id, item_name, expected_time, status)
+					VALUES ($1, $2, NULL, $3, $4, 'Bidding')`,
+					procID, tenantID, itemName, time.Now().Add(10 * 24 * time.Hour))
+			}
+		}
+		return nil
+	})
+}
+
 func (d *Database) GetRolesForTenant(tenantID string) map[string][]string {
 	ctx := context.Background()
 	roles := make(map[string][]string)
@@ -920,6 +951,14 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		log.Printf("GetStateForTenant background query error: %v", err)
 	}
 
+	overdueTasks := make(map[string]*types.Task)
+	now := time.Now()
+	for id, t := range tasks {
+		if t.DueDate != nil && t.DueDate.Before(now) && t.Status != "Completed" && t.Status != "Approved" {
+			overdueTasks[id] = t
+		}
+	}
+
 	return map[string]interface{}{
 		"tenants":            tenants,
 		"users":              users,
@@ -930,6 +969,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		"customers":          customers,
 		"material_requests":  materialRequests,
 		"procurement_orders": procurementOrders,
+		"overdue_tasks":      overdueTasks,
 	}
 }
 

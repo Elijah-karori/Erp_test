@@ -63,6 +63,8 @@ func (h *ERPHandler) CreateInventoryItemHandler(c echo.Context) error {
 	userID := c.Get(middleware.ContextUserID).(string)
 	h.sqliteDB.Log(tenantID, userID, "CreateItem_Request", fmt.Sprintf("Queued creation of %s (SN: %s)", cmd.Name, cmd.SerialNumber))
 
+	go h.db.CheckAndTriggerReorder(tenantID, cmd.Name)
+
 	return c.JSON(http.StatusAccepted, map[string]string{"message": "Item creation queued"})
 }
 
@@ -89,6 +91,10 @@ func (h *ERPHandler) AssignDeviceHandler(c echo.Context) error {
 	tenantID := c.Get(middleware.ContextTenantID).(string)
 	userID := c.Get(middleware.ContextUserID).(string)
 	h.sqliteDB.Log(tenantID, userID, "AssignItem_Request", fmt.Sprintf("Queued allocation of asset %s to tech %s", cmd.ItemID, cmd.UserID))
+
+	if item, err := h.db.GetInventoryItem(cmd.ItemID); err == nil {
+		go h.db.CheckAndTriggerReorder(tenantID, item.Name)
+	}
 
 	return c.JSON(http.StatusAccepted, map[string]string{"message": "Device assignment queued"})
 }
@@ -131,17 +137,42 @@ func (h *ERPHandler) ApproveTimesheetHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "TimesheetID is required"})
 	}
 
+	// Retrieve details synchronously to perform synchronous region ABAC/tenant checks
+	ts, err := h.db.GetTimesheet(cmd.TimesheetID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "Timesheet not found"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	if ts.TenantID != tenantID {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "Forbidden: Tenant boundary breach"})
+	}
+
+	task, err := h.db.GetTask(ts.TaskID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "Task not found"})
+	}
+
+	userID := c.Get(middleware.ContextUserID).(string)
+	user, err := h.db.GetUser(userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to resolve user context"})
+	}
+
+	if user.Region != task.Region {
+		h.sqliteDB.Log(tenantID, userID, "SecurityViolation_RegionMismatch", fmt.Sprintf("Synchronous block: User tried to approve timesheet %s with region mismatch", cmd.TimesheetID))
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "Forbidden: Region mismatch"})
+	}
+
 	msg := h.newContextMsg("erp.tasks.timesheet.cmd.approve", c)
 	payload, _ := json.Marshal(cmd)
 	msg.Data = payload
 
-	_, err := h.js.PublishMsg(msg)
+	_, err = h.js.PublishMsg(msg)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish timesheet approval command"})
 	}
 
-	tenantID := c.Get(middleware.ContextTenantID).(string)
-	userID := c.Get(middleware.ContextUserID).(string)
 	h.sqliteDB.Log(tenantID, userID, "ApproveTimesheet_Request", fmt.Sprintf("Queued approval of timesheet %s", cmd.TimesheetID))
 
 	return c.JSON(http.StatusAccepted, map[string]string{"message": "Timesheet approval queued"})

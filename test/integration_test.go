@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -17,6 +18,7 @@ import (
 	"erp-event-bus/handler"
 	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
+	"erp-event-bus/types"
 )
 
 func cleanAndSeedDB(t *testing.T) *db.Database {
@@ -184,4 +186,101 @@ func TestInventoryReorderProcurementAlert(t *testing.T) {
 	assert.Equal(t, "Procuring", mr2.Status) // Fallback as there is no stock left
 	assert.NotNil(t, proc2)
 	assert.Equal(t, "Bidding", proc2.Status)
+}
+
+func TestHardeningTaskManagementAndRegionMatching(t *testing.T) {
+	database := cleanAndSeedDB(t)
+	defer database.Pool.Close()
+
+	// 1. Overdue Tasks Filter Check
+	// Let's create an overdue task (past due date, not Completed or Approved)
+	pastDate := time.Now().Add(-24 * time.Hour)
+	tOverdue := &types.Task{
+		ID:         "task_overdue_1",
+		TenantID:   "tenant_safari",
+		Title:      "Overdue Fibre Fix",
+		AssignedTo: "usr_safari_tech",
+		CreatedBy:  "usr_safari_mgr",
+		Status:     "In_Progress",
+		Region:     "Nairobi",
+		DueDate:    &pastDate,
+	}
+	database.SaveTask(tOverdue)
+
+	// Create a task that is NOT overdue (due in future)
+	futureDate := time.Now().Add(24 * time.Hour)
+	tNotOverdue := &types.Task{
+		ID:         "task_not_overdue",
+		TenantID:   "tenant_safari",
+		Title:      "Future Install",
+		AssignedTo: "usr_safari_tech",
+		CreatedBy:  "usr_safari_mgr",
+		Status:     "In_Progress",
+		Region:     "Nairobi",
+		DueDate:    &futureDate,
+	}
+	database.SaveTask(tNotOverdue)
+
+	// Create a task that is past due date but COMPLETED (not overdue)
+	tCompletedPast := &types.Task{
+		ID:         "task_completed_past",
+		TenantID:   "tenant_safari",
+		Title:      "Completed Past Fix",
+		AssignedTo: "usr_safari_tech",
+		CreatedBy:  "usr_safari_mgr",
+		Status:     "Completed",
+		Region:     "Nairobi",
+		DueDate:    &pastDate,
+	}
+	database.SaveTask(tCompletedPast)
+
+	state := database.GetStateForTenant("tenant_safari")
+	overdueMap := state["overdue_tasks"].(map[string]*types.Task)
+
+	assert.Contains(t, overdueMap, "task_overdue_1")
+	assert.NotContains(t, overdueMap, "task_not_overdue")
+	assert.NotContains(t, overdueMap, "task_completed_past")
+
+	// 2. Timesheet Approval Region-Matching Gateway Check (Synchronous)
+	// Charlie Tech (Mombasa region) logs timesheet for 'task_safari_install' (Mombasa region)
+	// Bob Manager is in Nairobi region. Alice Admin is in Nairobi region.
+	// So Nairobi manager shouldn't be able to approve Mombasa task timesheet!
+	// Let's create a timesheet
+	ts := &types.Timesheet{
+		ID:       "tsh_mombasa_1",
+		TenantID: "tenant_safari",
+		TaskID:   "task_safari_install", // Mombasa region
+		UserID:   "usr_safari_tech",
+		Hours:    5.0,
+		Date:     time.Now(),
+		Status:   "Submitted",
+	}
+	database.SaveTimesheet(ts)
+
+	e := echo.New()
+	reqBody := `{"timesheet_id": "tsh_mombasa_1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/timesheets/approve", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization-Tenant-Id", "tenant_safari")
+	req.Header.Set("Authorization-User-Id", "usr_safari_mgr")
+	req.Header.Set("Authorization-Roles", "manager")
+	req.Header.Set("Authorization-Region", "Nairobi")
+	rec := httptest.NewRecorder()
+
+	c := e.NewContext(req, rec)
+	c.Set(middleware.ContextTenantID, "tenant_safari")
+	c.Set(middleware.ContextUserID, "usr_safari_mgr")
+	c.Set(middleware.ContextRoles, "manager")
+	c.Set(middleware.ContextRegion, "Nairobi")
+
+	// We pass a dummy sqlite database so h.sqliteDB.Log doesn't crash on nil pointer
+	sdb, err := db.InitSQLite(":memory:")
+	assert.NoError(t, err)
+	sdb.Pool = database.Pool
+
+	h := handler.NewERPHandler(nil, nil, sdb, database)
+	err = h.ApproveTimesheetHandler(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Region mismatch")
 }

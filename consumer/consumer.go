@@ -41,7 +41,7 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	// 3. TASKS Consumer: Technician timesheets with hierarchical approvals
 	taskCons, err := js.Consumer(ctx, "TASKS", "TaskTimesheetWorker")
 	if err == nil {
-		go consumeTasks(taskCons, js, database, sdb)
+		go consumeTasks(taskCons, js, nc, database, sdb)
 	} else {
 		log.Printf("Warning: Tasks consumer binding skipped: %v", err)
 	}
@@ -89,6 +89,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			})
 			log.Printf("INVENTORY: Created serialized item %s under Tenant %s", itemID, tenantID)
 			sdb.Log(tenantID, userID, "CreateItem_Success", fmt.Sprintf("Asset %s (SN: %s) created in SQLite", cmd.Name, cmd.SerialNumber))
+			database.CheckAndTriggerReorder(tenantID, cmd.Name)
 			msg.Ack()
 
 		case "erp.inventory.item.cmd.assign":
@@ -129,6 +130,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 
 			log.Printf("INVENTORY: Serialized asset %s allocated to tech %s under tenant %s", item.ID, cmd.UserID, tenantID)
 			sdb.Log(tenantID, userID, "AssignItem_Success", fmt.Sprintf("Asset %s allocated to tech %s", cmd.ItemID, cmd.UserID))
+			database.CheckAndTriggerReorder(tenantID, item.Name)
 			msg.Ack()
 
 		default:
@@ -222,7 +224,7 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 }
 
 // consumeTasks resolves timesheet submissions based on user/role superiors checks
-func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB) {
+func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, nc *nats.Conn, database *db.Database, sdb *db.SQLiteDB) {
 	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
@@ -275,6 +277,39 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 				return
 			}
 
+			task, err := database.GetTask(ts.TaskID)
+			if err != nil {
+				msg.Term()
+				return
+			}
+
+			// Region matching: manager/approver must belong to the same region as the task
+			if approver.Region != task.Region {
+				log.Printf("SECURITY VIOLATION: Approver region %s does not match task region %s", approver.Region, task.Region)
+
+				// Audit-trail the violation by publishing a security alert to erp.security.audit.v1.failed_access
+				alert := types.CloudEvent[types.AuditAlert]{
+					SpecVersion:     "1.0",
+					ID:              uuid.New().String(),
+					Source:          "consumer.tasks",
+					Type:            "erp.security.audit.v1.failed_access",
+					Time:            time.Now(),
+					DataContentType: "application/json",
+					Data: types.AuditAlert{
+						UserID:    userID,
+						OrderID:   ts.ID,
+						Reason:    fmt.Sprintf("Region mismatch: Approver %s vs Task %s", approver.Region, task.Region),
+						Violation: "REGION_APPROVE_MISMATCH",
+					},
+				}
+				alertBytes, _ := json.Marshal(alert)
+				_ = nc.Publish("erp.security.audit.v1.failed_access", alertBytes)
+
+				sdb.Log(tenantID, userID, "SecurityViolation_RegionMismatch", fmt.Sprintf("User tried to approve timesheet %s with region mismatch", cmd.TimesheetID))
+				msg.Term()
+				return
+			}
+
 			err = database.ApproveTimesheetTransaction(cmd.TimesheetID, userID)
 			if err != nil {
 				log.Printf("TASKS ABAC: Timesheet approval failed: %v", err)
@@ -284,6 +319,91 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 
 			log.Printf("TASKS: Timesheet %s successfully approved by superior %s under tenant %s", ts.ID, userID, tenantID)
 			sdb.Log(tenantID, userID, "ApproveTimesheet_Success", fmt.Sprintf("Approved timesheet %s for subordinate technician %s", cmd.TimesheetID, ts.UserID))
+			msg.Ack()
+
+		case "erp.tasks.task.cmd.update_status":
+			var cmd types.UpdateTaskStatusCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			task, err := database.GetTask(cmd.TaskID)
+			if err != nil {
+				msg.Term()
+				return
+			}
+
+			if task.TenantID != tenantID {
+				msg.Term()
+				return
+			}
+
+			if cmd.Status == "In_Progress" && task.DependsOn != "" {
+				parent, err := database.GetTask(task.DependsOn)
+				if err != nil {
+					msg.Term()
+					return
+				}
+				if parent.Status != "Completed" && parent.Status != "Approved" {
+					log.Printf("TASKS ABAC: Dependency gate blocked. Task %s depends on %s (current status: %s)", task.ID, task.DependsOn, parent.Status)
+
+					alert := types.CloudEvent[types.AuditAlert]{
+						SpecVersion:     "1.0",
+						ID:              uuid.New().String(),
+						Source:          "consumer.tasks",
+						Type:            "erp.security.audit.v1.failed_access",
+						Time:            time.Now(),
+						DataContentType: "application/json",
+						Data: types.AuditAlert{
+							UserID:    userID,
+							OrderID:   task.ID,
+							Reason:    fmt.Sprintf("Dependency %s status is %s", task.DependsOn, parent.Status),
+							Violation: "TASK_DEPENDENCY_GATE",
+						},
+					}
+					alertBytes, _ := json.Marshal(alert)
+					_ = nc.Publish("erp.security.audit.v1.failed_access", alertBytes)
+
+					sdb.Log(tenantID, userID, "SecurityViolation_DependencyGate", fmt.Sprintf("Blocked transition of %s to In_Progress due to unfinished parent %s", task.ID, task.DependsOn))
+					msg.Term()
+					return
+				}
+			}
+
+			task.Status = cmd.Status
+			database.SaveTask(task)
+			sdb.Log(tenantID, userID, "UpdateTaskStatus_Success", fmt.Sprintf("Task %s status updated to %s", task.ID, cmd.Status))
+			msg.Ack()
+
+		case "erp.tasks.task.cmd.create":
+			var cmd types.CreateTaskCommand
+			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+				msg.Term()
+				return
+			}
+
+			if cmd.AssignedTo != "" {
+				user, err := database.GetUser(cmd.AssignedTo)
+				if err != nil || user.TenantID != tenantID {
+					msg.Term()
+					return
+				}
+			}
+
+			task := &types.Task{
+				ID:         cmd.ID,
+				TenantID:   tenantID,
+				Title:      cmd.Title,
+				AssignedTo: cmd.AssignedTo,
+				CreatedBy:  userID,
+				Status:     "Pending",
+				Region:     msg.Headers().Get(types.HeaderUserRegion),
+				DueDate:    cmd.DueDate,
+				DependsOn:  cmd.DependsOn,
+			}
+			database.SaveTask(task)
+			sdb.Log(tenantID, userID, "CreateTask_Success", fmt.Sprintf("Task %s created successfully", cmd.ID))
 			msg.Ack()
 
 		case "erp.users.auth.cmd.reset_password":
