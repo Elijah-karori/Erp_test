@@ -40,7 +40,13 @@ func (s *SQLiteDB) Log(tenantID, userID, action, details string) {
 	}
 	defer tx.Rollback(ctx)
 
-	_, _ = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+	if tenantID != "" {
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			log.Printf("Warning: Failed to set tenant config in Postgres log: %v", err)
+			return
+		}
+	}
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO erp_logs (tenant_id, user_id, action, details, created_at)
@@ -88,7 +94,12 @@ func (s *SQLiteDB) GetLogsForTenant(tenantID string) ([]DBLog, error) {
 	}
 	defer tx.Rollback(ctx)
 
-	_, _ = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+	if tenantID != "" {
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	rows, err := tx.Query(ctx, "SELECT id, tenant_id, user_id, action, details, created_at FROM erp_logs WHERE tenant_id = $1 ORDER BY id DESC LIMIT 50", tenantID)
 	if err != nil {

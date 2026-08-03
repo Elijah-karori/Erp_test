@@ -357,7 +357,7 @@ func (d *Database) RegisterUserTransaction(id, tenantID, tenantName, name, email
 	user.Region = region
 	user.PasswordHash = passwordHash
 
-	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+	err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
 		var emailExists bool
 		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(email) = LOWER($1))", user.Email).Scan(&emailExists)
 		if emailExists {

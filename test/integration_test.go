@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/nats-io/nats.go"
@@ -41,6 +42,28 @@ func cleanAndSeedDB(t *testing.T) *db.Database {
 
 	database := db.NewDatabase(pool)
 	return database
+}
+
+func withTestTx(pool *pgxpool.Pool, tenantID string, fn func(tx pgx.Tx) error) error {
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if tenantID != "" {
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func TestHierarchicalRoleClearance_Middleware(t *testing.T) {
@@ -170,13 +193,19 @@ func TestInventoryReorderProcurementAlert(t *testing.T) {
 	// Let's verify that a procurement_orders row is auto-created because of reorder threshold!
 	ctx := context.Background()
 	var count int
-	err = database.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM procurement_orders WHERE tenant_id = 'tenant_safari' AND item_name = 'Huawei GPON ONU'").Scan(&count)
+	err = withTestTx(database.Pool, "tenant_safari", func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT COUNT(*) FROM procurement_orders WHERE tenant_id = 'tenant_safari' AND item_name = 'Huawei GPON ONU'").Scan(&count)
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, count, "Auto-created procurement order should exist under tenant_safari for low stock warning")
 
 	// If we approve a second request, it will procurement fallback as usual
 	// Let's verify that too
-	_, _ = database.Pool.Exec(ctx, "INSERT INTO material_requests (id, tenant_id, requester_id, item_name, status, created_at) VALUES ('req_safari_2', 'tenant_safari', 'usr_safari_tech', 'Huawei GPON ONU', 'Pending_Leader_Approval', NOW())")
+	err = withTestTx(database.Pool, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO material_requests (id, tenant_id, requester_id, item_name, status, created_at) VALUES ('req_safari_2', 'tenant_safari', 'usr_safari_tech', 'Huawei GPON ONU', 'Pending_Leader_Approval', NOW())")
+		return err
+	})
+	assert.NoError(t, err)
 
 	mr2, proc2, err := database.ApproveMaterialRequestTransaction("req_safari_2", "tenant_safari", "usr_safari_admin")
 	assert.NoError(t, err)
