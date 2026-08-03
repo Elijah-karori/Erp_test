@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"erp-event-bus/auth"
 	"erp-event-bus/db"
 )
 
@@ -16,7 +17,39 @@ const (
 	ContextRegion   = "region"
 )
 
-// MockAuthMiddleware extracts multi-tenant and user credentials from request headers and sets them in Context
+// JWTAuthMiddleware verifies a signed bearer token and populates the same
+// context keys MockAuthMiddleware used to set from raw headers — so
+// ModuleClearanceMiddleware and every downstream handler work unchanged.
+// This is what actually protects the API; identity now comes from a
+// verified token, not from headers the caller can set to anything.
+func JWTAuthMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			header := c.Request().Header.Get("Authorization")
+			if !strings.HasPrefix(header, "Bearer ") {
+				return echo.NewHTTPError(http.StatusUnauthorized, "missing or malformed Authorization header")
+			}
+			tokenString := strings.TrimPrefix(header, "Bearer ")
+
+			claims, err := auth.ParseToken(tokenString)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired token")
+			}
+
+			c.Set(ContextTenantID, claims.TenantID)
+			c.Set(ContextUserID, claims.UserID)
+			c.Set(ContextRoles, claims.Roles)
+			c.Set(ContextRegion, claims.Region)
+
+			return next(c)
+		}
+	}
+}
+
+// MockAuthMiddleware extracts multi-tenant and user credentials directly
+// from request headers with no verification at all. It is kept only
+// because test/integration_test.go depends on it — it must never be wired
+// into a real route again (see JWTAuthMiddleware for the replacement).
 func MockAuthMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -60,9 +93,14 @@ func ModuleClearanceMiddleware(database *db.Database, requiredPermission string)
 			rolesList := strings.Split(rolesStr, ",")
 			hasAccess := false
 
+			tenantID, _ := c.Get(ContextTenantID).(string)
+			if tenantID == "" {
+				tenantID = "tenant_safari"
+			}
+
 			// Check current role or parent inherited roles
 			for _, roleName := range rolesList {
-				if database.CheckPermission(strings.TrimSpace(roleName), requiredPermission) {
+				if database.CheckPermission(tenantID, strings.TrimSpace(roleName), requiredPermission) {
 					hasAccess = true
 					break
 				}

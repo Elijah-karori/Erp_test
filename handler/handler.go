@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/nats-io/nats.go"
 
+	"erp-event-bus/auth"
 	"erp-event-bus/db"
 	"erp-event-bus/middleware"
 	"erp-event-bus/types"
@@ -19,11 +20,12 @@ type ERPHandler struct {
 	nc       *nats.Conn
 	js       nats.JetStreamContext
 	sqliteDB *db.SQLiteDB
+	db       *db.Database
 }
 
 // NewERPHandler constructs a new ERPHandler with SQLite logging
-func NewERPHandler(nc *nats.Conn, js nats.JetStreamContext, sdb *db.SQLiteDB) *ERPHandler {
-	return &ERPHandler{nc: nc, js: js, sqliteDB: sdb}
+func NewERPHandler(nc *nats.Conn, js nats.JetStreamContext, sdb *db.SQLiteDB, database *db.Database) *ERPHandler {
+	return &ERPHandler{nc: nc, js: js, sqliteDB: sdb, db: database}
 }
 
 // Helper to construct a NATS message with multi-tenant context propagation headers
@@ -156,11 +158,20 @@ func (h *ERPHandler) ResetPasswordHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "UserID and NewPassword are required"})
 	}
 
+	// Hash here, synchronously, before anything touches the event bus —
+	// NATS payloads land in JetStream storage and the SQLite audit log, so
+	// the plaintext password must never survive past this point.
+	hash, err := auth.HashPassword(cmd.NewPassword)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	cmd.NewPassword = hash
+
 	msg := h.newContextMsg("erp.users.auth.cmd.reset_password", c)
 	payload, _ := json.Marshal(cmd)
 	msg.Data = payload
 
-	_, err := h.js.PublishMsg(msg)
+	_, err = h.js.PublishMsg(msg)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish reset password command"})
 	}

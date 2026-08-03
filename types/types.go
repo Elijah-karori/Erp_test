@@ -19,43 +19,44 @@ type Tenant struct {
 
 // User role definition
 type Role struct {
-	Name        string   `json:"name"`          // e.g. "admin", "manager", "technician"
-	ParentRole  string   `json:"parent_role"`   // Role inheritance hierarchy (e.g. "manager" parent of "technician")
-	Permissions []string `json:"permissions"`   // Module access permissions (e.g. "inventory:read", "finance:write", "tasks:approve")
+	Name        string   `json:"name"`        // e.g. "admin", "manager", "technician"
+	ParentRole  string   `json:"parent_role"` // Role inheritance hierarchy (e.g. "manager" parent of "technician")
+	Permissions []string `json:"permissions"` // Module access permissions (e.g. "inventory:read", "finance:write", "tasks:approve")
 }
 
 // User account details with password credentials support
 type User struct {
-	ID       string `json:"id"`
-	TenantID string `json:"tenant_id"`
-	Name     string `json:"name"`
-	RoleName string `json:"role_name"`
-	Region   string `json:"region"`
-	Password string `json:"password"` // Encrypted or plain in mock
+	ID           string `json:"id"`
+	TenantID     string `json:"tenant_id"`
+	Name         string `json:"name"`
+	Email        string `json:"email"` // Unique login identifier
+	RoleName     string `json:"role_name"`
+	Region       string `json:"region"`
+	PasswordHash string `json:"-"` // bcrypt hash, never serialized in API responses
 }
 
 // Customer details
 type Customer struct {
-	ID           string `json:"id"`
-	TenantID     string `json:"tenant_id"`
-	Name         string `json:"name"`
-	Phone        string `json:"phone"`
-	Email        string `json:"email"`
-	DeviceID     string `json:"device_id"`     // Connected serial device
-	InvoiceID    string `json:"invoice_id"`    // Connected invoice
+	ID             string `json:"id"`
+	TenantID       string `json:"tenant_id"`
+	Name           string `json:"name"`
+	Phone          string `json:"phone"`
+	Email          string `json:"email"`
+	DeviceID       string `json:"device_id"`       // Connected serial device
+	InvoiceID      string `json:"invoice_id"`      // Connected invoice
 	DispatchStatus string `json:"dispatch_status"` // e.g. "Pending", "Dispatched", "Delivered"
 }
 
 // Material request workflow (Routers, materials)
 type MaterialRequest struct {
-	ID            string    `json:"id"`
-	TenantID      string    `json:"tenant_id"`
-	TaskID        string    `json:"task_id"`
-	RequesterID   string    `json:"requester_id"` // Technician ID
-	ItemName      string    `json:"item_name"`    // e.g. "GPON ONU Router"
-	Status        string    `json:"status"`       // e.g. "Started", "Pending_Leader_Approval", "Fulfilled", "Procuring"
-	AllocatedSN   string    `json:"allocated_sn"` // Serial Number once fulfilled
-	Timestamp     time.Time `json:"timestamp"`
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	TaskID      string    `json:"task_id"`
+	RequesterID string    `json:"requester_id"` // Technician ID
+	ItemName    string    `json:"item_name"`    // e.g. "GPON ONU Router"
+	Status      string    `json:"status"`       // e.g. "Started", "Pending_Leader_Approval", "Fulfilled", "Procuring"
+	AllocatedSN string    `json:"allocated_sn"` // Serial Number once fulfilled
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // Procurement backup order
@@ -70,13 +71,14 @@ type ProcurementOrder struct {
 
 // Inventory item with serial number tracking
 type InventoryItem struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	Name         string    `json:"name"`
-	SerialNumber string    `json:"serial_number"` // Tightly controlled serial tracking
-	Status       string    `json:"status"`        // e.g. "In_Stock", "Assigned", "Deployed"
-	AssignedTo   string    `json:"assigned_to"`   // Technician User ID
-	Region       string    `json:"region"`
+	ID               string `json:"id"`
+	TenantID         string `json:"tenant_id"`
+	Name             string `json:"name"`
+	SerialNumber     string `json:"serial_number"` // Tightly controlled serial tracking
+	Status           string `json:"status"`        // e.g. "In_Stock", "Assigned", "Deployed"
+	AssignedTo       string `json:"assigned_to"`   // Technician User ID
+	Region           string `json:"region"`
+	ReorderThreshold int    `json:"reorder_threshold"`
 }
 
 // M-Pesa Payment Methods
@@ -90,14 +92,14 @@ const (
 
 // Finance Invoice supporting credit-limits & partial payments
 type Invoice struct {
-	ID            string    `json:"id"`
-	TenantID      string    `json:"tenant_id"`
-	CustomerID    string    `json:"customer_id"`
-	TotalAmount   float64   `json:"total_amount"`
-	PaidAmount    float64   `json:"paid_amount"`
-	BalanceAmount float64   `json:"balance_amount"`
-	Status        string    `json:"status"` // e.g. "Draft", "Approved", "Partially_Paid", "Paid"
-	Region        string    `json:"region"`
+	ID            string  `json:"id"`
+	TenantID      string  `json:"tenant_id"`
+	CustomerID    string  `json:"customer_id"`
+	TotalAmount   float64 `json:"total_amount"`
+	PaidAmount    float64 `json:"paid_amount"`
+	BalanceAmount float64 `json:"balance_amount"`
+	Status        string  `json:"status"` // e.g. "Draft", "Approved", "Partially_Paid", "Paid"
+	Region        string  `json:"region"`
 }
 
 // Invoice Payment
@@ -113,31 +115,47 @@ type Payment struct {
 
 // Task model representing jobs (installation, repair, etc)
 type Task struct {
-	ID         string    `json:"id"`
-	TenantID   string    `json:"tenant_id"`
-	Title      string    `json:"title"`
-	AssignedTo string    `json:"assigned_to"` // Technician ID
-	CreatedBy  string    `json:"created_by"`  // Manager ID
-	Status     string    `json:"status"`      // e.g. "Pending", "In_Progress", "Completed", "Approved"
-	Region     string    `json:"region"`
+	ID         string     `json:"id"`
+	TenantID   string     `json:"tenant_id"`
+	Title      string     `json:"title"`
+	AssignedTo string     `json:"assigned_to"` // Technician ID
+	CreatedBy  string     `json:"created_by"`  // Manager ID
+	Status     string     `json:"status"`      // e.g. "Pending", "In_Progress", "Completed", "Approved"
+	Region     string     `json:"region"`
+	DueDate    *time.Time `json:"due_date,omitempty"`
+	DependsOn  string     `json:"depends_on,omitempty"`
 }
 
 // Timesheet submission
 type Timesheet struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	TaskID    string    `json:"task_id"`
-	UserID    string    `json:"user_id"`
-	Hours     float64   `json:"hours"`
-	Date      time.Time `json:"date"`
-	Status    string    `json:"status"` // e.g. "Submitted", "Approved", "Rejected"
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	TaskID     string    `json:"task_id"`
+	UserID     string    `json:"user_id"`
+	Hours      float64   `json:"hours"`
+	Date       time.Time `json:"date"`
+	Status     string    `json:"status"` // e.g. "Submitted", "Approved", "Rejected"
 	ApprovedBy string    `json:"approved_by"`
 }
 
 // Commands & Events for NATS
 type CreateItemCommand struct {
-	Name         string `json:"name"`
-	SerialNumber string `json:"serial_number"`
+	Name             string `json:"name"`
+	SerialNumber     string `json:"serial_number"`
+	ReorderThreshold int    `json:"reorder_threshold"`
+}
+
+type CreateTaskCommand struct {
+	ID         string     `json:"id"`
+	Title      string     `json:"title"`
+	AssignedTo string     `json:"assigned_to"`
+	DueDate    *time.Time `json:"due_date,omitempty"`
+	DependsOn  string     `json:"depends_on,omitempty"`
+}
+
+type UpdateTaskStatusCommand struct {
+	TaskID string `json:"task_id"`
+	Status string `json:"status"`
 }
 
 // Allocate task or serial device
