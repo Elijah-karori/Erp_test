@@ -2,21 +2,25 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 
+	"erp-event-bus/consumer"
 	"erp-event-bus/db"
 	"erp-event-bus/handler"
 	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
+	"erp-event-bus/types"
 )
 
 func cleanAndSeedDB(t *testing.T) *db.Database {
@@ -184,4 +188,157 @@ func TestInventoryReorderProcurementAlert(t *testing.T) {
 	assert.Equal(t, "Procuring", mr2.Status) // Fallback as there is no stock left
 	assert.NotNil(t, proc2)
 	assert.Equal(t, "Bidding", proc2.Status)
+}
+
+func TestTaskDependencyEnforcement(t *testing.T) {
+	bus, err := eventbus.Start()
+	assert.NoError(t, err)
+	defer func() {
+		_ = bus.Conn.Drain()
+		bus.Server.Shutdown()
+	}()
+
+	nc := bus.Conn
+	jsContext := bus.JS
+
+	// Configure stream and consumer
+	_, err = jsContext.AddStream(&nats.StreamConfig{
+		Name:     "TASKS",
+		Subjects: []string{"erp.tasks.>"},
+		Storage:  nats.MemoryStorage,
+	})
+	assert.NoError(t, err)
+	defer jsContext.DeleteStream("TASKS")
+
+	_, err = jsContext.AddConsumer("TASKS", &nats.ConsumerConfig{
+		Durable:       "TaskTimesheetWorker",
+		FilterSubject: "erp.tasks.task.cmd.>",
+	})
+	assert.NoError(t, err)
+
+	database := cleanAndSeedDB(t)
+	defer database.Pool.Close()
+
+	sdb, err := db.InitSQLite(":memory:")
+	assert.NoError(t, err)
+	sdb.Pool = database.Pool
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = consumer.StartERPProcessors(ctx, nc, database, sdb)
+	assert.NoError(t, err)
+
+	// Create Task A (Pending)
+	taskA := &types.Task{
+		ID:         "task_A",
+		TenantID:   "tenant_safari",
+		Title:      "VPC Setup",
+		AssignedTo: "usr_safari_tech",
+		CreatedBy:  "usr_safari_mgr",
+		Status:     "Pending",
+		Region:     "Nairobi",
+	}
+	database.SaveTask(taskA)
+
+	// Create Task B (Depends on Task A, Pending)
+	taskB := &types.Task{
+		ID:         "task_B",
+		TenantID:   "tenant_safari",
+		Title:      "Deploy App",
+		AssignedTo: "usr_safari_tech",
+		CreatedBy:  "usr_safari_mgr",
+		Status:     "Pending",
+		Region:     "Nairobi",
+		DependsOn:  "task_A",
+	}
+	database.SaveTask(taskB)
+
+	// 1. Try to set Task B to In_Progress. This should fail because Task A is Pending.
+	cmd := types.UpdateTaskStatusCommand{
+		TaskID: "task_B",
+		Status: "In_Progress",
+	}
+	payload, _ := json.Marshal(cmd)
+	msg := nats.NewMsg("erp.tasks.task.cmd.update_status")
+	msg.Header.Set(types.HeaderTenantID, "tenant_safari")
+	msg.Header.Set(types.HeaderUserID, "usr_safari_mgr")
+	msg.Header.Set(types.HeaderUserRoles, "manager")
+	msg.Data = payload
+
+	_, err = jsContext.PublishMsg(msg)
+	assert.NoError(t, err)
+
+	time.Sleep(150 * time.Millisecond)
+
+	// Task B status should still be Pending!
+	taskBChecked, err := database.GetTask("task_B")
+	assert.NoError(t, err)
+	assert.Equal(t, "Pending", taskBChecked.Status)
+
+	// 2. Set Task A to Completed
+	taskA.Status = "Completed"
+	database.SaveTask(taskA)
+
+	// 3. Try to set Task B to In_Progress again. This should now succeed!
+	_, err = jsContext.PublishMsg(msg)
+	assert.NoError(t, err)
+
+	time.Sleep(150 * time.Millisecond)
+
+	taskBChecked, err = database.GetTask("task_B")
+	assert.NoError(t, err)
+	assert.Equal(t, "In_Progress", taskBChecked.Status)
+}
+
+func TestRegionalTimesheetApproval(t *testing.T) {
+	e := echo.New()
+	database := cleanAndSeedDB(t)
+	defer database.Pool.Close()
+
+	sdb, err := db.InitSQLite(":memory:")
+	assert.NoError(t, err)
+	sdb.Pool = database.Pool
+
+	h := handler.NewERPHandler(nil, nil, sdb, database)
+
+	// Create a task in Mombasa
+	task := &types.Task{
+		ID:         "task_mombasa",
+		TenantID:   "tenant_safari",
+		Title:      "Mombasa FTTH",
+		AssignedTo: "usr_safari_tech",
+		CreatedBy:  "usr_safari_mgr",
+		Status:     "Pending",
+		Region:     "Mombasa",
+	}
+	database.SaveTask(task)
+
+	// Create a timesheet for it
+	ts := &types.Timesheet{
+		ID:       "ts_mombasa",
+		TenantID: "tenant_safari",
+		TaskID:   "task_mombasa",
+		UserID:   "usr_safari_tech",
+		Hours:    5.0,
+		Status:   "Submitted",
+	}
+	database.SaveTimesheet(ts)
+
+	// Bob Manager is in Nairobi, so trying to approve Mombasa timesheet should 403 (StatusForbidden)
+	req := httptest.NewRequest(http.MethodPost, "/tasks/timesheets/approve", strings.NewReader(`{"timesheet_id": "ts_mombasa"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization-Tenant-Id", "tenant_safari")
+	req.Header.Set("Authorization-User-Id", "usr_safari_mgr")
+	req.Header.Set("Authorization-Roles", "manager")
+	req.Header.Set("Authorization-Region", "Nairobi")
+	rec := httptest.NewRecorder()
+
+	c := e.NewContext(req, rec)
+	auth := middleware.MockAuthMiddleware()
+	handlerFunc := auth(h.ApproveTimesheetHandler)
+
+	err = handlerFunc(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
 }

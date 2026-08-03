@@ -196,6 +196,11 @@ type CreateCustomerCommand struct {
 	Email string `json:"email"`
 }
 
+type UpdateInventoryThresholdCommand struct {
+	ItemID           string `json:"item_id"`
+	ReorderThreshold int    `json:"reorder_threshold"`
+}
+
 // CloudEvent standard payload structure as requested
 type CloudEvent[T any] struct {
 	SpecVersion     string    `json:"specversion"`
