@@ -17,6 +17,7 @@ import (
 	"erp-event-bus/handler"
 	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -32,6 +33,25 @@ func main() {
 	nc := bus.Conn
 	js := bus.JS
 
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("SUPABASE_DB_URL")
+	}
+	if dbURL == "" {
+		log.Fatalf("DATABASE_URL or SUPABASE_DB_URL environment variable is required")
+	}
+
+	config, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		log.Fatalf("Failed to parse DATABASE_URL: %v", err)
+	}
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		log.Fatalf("Failed to create connection pool: %v", err)
+	}
+	defer pool.Close()
+
 	// Setup Multi-Tenant Streams with multiple subjects support
 	setupStream(js, "INVENTORY", []string{"erp.inventory.>"})
 	setupStream(js, "FINANCE", []string{"erp.finance.>", "erp.customers.>"})
@@ -39,7 +59,7 @@ func main() {
 
 	// Setup Durable Consumers with wildcards matching the expanded subjects
 	setupConsumer(js, "INVENTORY", "InventoryWorker", "erp.inventory.>")
-	setupConsumer(js, "FINANCE", "FinanceWorker", "erp.>") // Matches all finance and customer events
+	setupConsumer(js, "FINANCE", "FinanceWorker", "erp.>")     // Matches all finance and customer events
 	setupConsumer(js, "TASKS", "TaskTimesheetWorker", "erp.>") // Matches all tasks and users events
 
 	// 4. Initialize SQLite Persistent Log Database
@@ -49,7 +69,8 @@ func main() {
 	}
 
 	// Initialize In-Memory Database
-	database := db.NewDatabase()
+	database := db.NewDatabase(pool)
+	sqliteDB.Pool = pool
 
 	// 5. Initialize downstream JetStream Consumer in background
 	ctx, cancel := context.WithCancel(context.Background())
@@ -66,19 +87,31 @@ func main() {
 	uiHandler := handler.NewUIHandler(database, sqliteDB)
 	e.GET("/", uiHandler.ServeDashboard)
 
-	// Set up mock auth middleware on all API group requests
+	// Public auth endpoints — no token required to reach these, since this
+	// is where a token comes from in the first place.
+	authHandler := handler.NewAuthHandler(database, sqliteDB)
+	e.POST("/api/register", authHandler.RegisterHandler)
+	e.POST("/api/login", authHandler.LoginHandler)
+
+	// Every other /api route requires a verified JWT from here on.
 	api := e.Group("/api")
-	api.Use(middleware.MockAuthMiddleware())
+	api.Use(middleware.JWTAuthMiddleware())
+
+	api.GET("/me", authHandler.MeHandler)
 
 	// State and live log endpoints for UI rendering
 	api.GET("/state", uiHandler.GetState)
 	api.GET("/logs", uiHandler.GetLogs)
 	api.POST("/rbac/update", uiHandler.UpdateRBAC, middleware.ModuleClearanceMiddleware(database, "users:*"))
-	api.POST("/tenants", uiHandler.CreateTenant)
-	api.POST("/users", uiHandler.CreateUser)
-	e.GET("/api/exports/excel", uiHandler.ExportLogsExcel) // Export route direct download
+	api.POST("/tenants", uiHandler.CreateTenant, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	// Previously ungated — any caller could create a user with any role,
+	// including tenant_admin. Now requires an authenticated admin.
+	api.POST("/users", uiHandler.CreateUser, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	// Previously registered directly on `e`, bypassing JWTAuthMiddleware
+	// entirely — anyone could download the full audit log with no token.
+	api.GET("/exports/excel", uiHandler.ExportLogsExcel)
 
-	h := handler.NewERPHandler(nc, js, sqliteDB)
+	h := handler.NewERPHandler(nc, js, sqliteDB, database)
 
 	// Inventory Endpoints: (Hierarchy Checks via middleware permission levels)
 	api.POST("/inventory", h.CreateInventoryItemHandler, middleware.ModuleClearanceMiddleware(database, "inventory:write"))

@@ -1,541 +1,1037 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
+
+	"erp-event-bus/auth"
 	"erp-event-bus/types"
 )
 
-// Database represents a safe in-memory database mock for multi-tenant ERP operations
 type Database struct {
-	mu                sync.RWMutex
-	Tenants           map[string]*types.Tenant
-	Users             map[string]*types.User
-	Roles             map[string]*types.Role
-	Inventory         map[string]*types.InventoryItem
-	Invoices          map[string]*types.Invoice
-	Payments          map[string]*types.Payment
-	Tasks             map[string]*types.Task
-	Timesheets        map[string]*types.Timesheet
-	Customers         map[string]*types.Customer
-	MaterialRequests  map[string]*types.MaterialRequest
-	ProcurementOrders map[string]*types.ProcurementOrder
+	Pool *pgxpool.Pool
 }
 
-// NewDatabase initializes a new mock database with multi-tenant seed data
-func NewDatabase() *Database {
-	d := &Database{
-		Tenants:           make(map[string]*types.Tenant),
-		Users:             make(map[string]*types.User),
-		Roles:             make(map[string]*types.Role),
-		Inventory:         make(map[string]*types.InventoryItem),
-		Invoices:          make(map[string]*types.Invoice),
-		Payments:          make(map[string]*types.Payment),
-		Tasks:             make(map[string]*types.Task),
-		Timesheets:        make(map[string]*types.Timesheet),
-		Customers:         make(map[string]*types.Customer),
-		MaterialRequests:  make(map[string]*types.MaterialRequest),
-		ProcurementOrders: make(map[string]*types.ProcurementOrder),
+func mustHashSeedPassword(plaintext string) string {
+	hash, err := auth.HashPassword(plaintext)
+	if err != nil {
+		log.Fatalf("failed to hash seed password: %v", err)
 	}
-
-	// 1. Seed Roles with Hierarchy and Permissions
-	// TenantAdmin (inherits Manager) > Manager (inherits Technician) > Technician
-	d.Roles["field_technician"] = &types.Role{
-		Name:        "field_technician",
-		ParentRole:  "",
-		Permissions: []string{"inventory:read", "tasks:read", "timesheets:submit"},
-	}
-	d.Roles["finance_officer"] = &types.Role{
-		Name:        "finance_officer",
-		ParentRole:  "",
-		Permissions: []string{"finance:read", "finance:write"},
-	}
-	d.Roles["manager"] = &types.Role{
-		Name:        "manager",
-		ParentRole:  "field_technician",
-		Permissions: []string{"finance:read", "tasks:create", "tasks:approve", "timesheets:approve"},
-	}
-	d.Roles["tenant_admin"] = &types.Role{
-		Name:        "tenant_admin",
-		ParentRole:  "manager",
-		Permissions: []string{"inventory:*", "finance:*", "tasks:*", "users:*"},
-	}
-
-	// 2. Seed Tenants (Representing different enterprise subscribers)
-	d.Tenants["tenant_safari"] = &types.Tenant{ID: "tenant_safari", Name: "Safaricom ISP Services"}
-	d.Tenants["tenant_pioneer"] = &types.Tenant{ID: "tenant_pioneer", Name: "Pioneer Printer Maintenance"}
-
-	// 3. Seed Users across Tenants and Regions with credentials
-	// Tenant: Safari
-	d.Users["usr_safari_admin"] = &types.User{ID: "usr_safari_admin", TenantID: "tenant_safari", Name: "Alice Admin", RoleName: "tenant_admin", Region: "Nairobi", Password: "admin"}
-	d.Users["usr_safari_mgr"] = &types.User{ID: "usr_safari_mgr", TenantID: "tenant_safari", Name: "Bob Manager", RoleName: "manager", Region: "Nairobi", Password: "password"}
-	d.Users["usr_safari_tech"] = &types.User{ID: "usr_safari_tech", TenantID: "tenant_safari", Name: "Charlie Tech", RoleName: "field_technician", Region: "Mombasa", Password: "password"}
-
-	// Tenant: Pioneer
-	d.Users["usr_pioneer_mgr"] = &types.User{ID: "usr_pioneer_mgr", TenantID: "tenant_pioneer", Name: "Daniel Manager", RoleName: "manager", Region: "Kisumu", Password: "password"}
-	d.Users["usr_pioneer_fin"] = &types.User{ID: "usr_pioneer_fin", TenantID: "tenant_pioneer", Name: "Eva Finance", RoleName: "finance_officer", Region: "Kisumu", Password: "password"}
-	d.Users["usr_pioneer_tech"] = &types.User{ID: "usr_pioneer_tech", TenantID: "tenant_pioneer", Name: "Frank Tech", RoleName: "field_technician", Region: "Nairobi", Password: "password"}
-
-	// Seed some Customers
-	d.Customers["cust_saf_77"] = &types.Customer{ID: "cust_saf_77", TenantID: "tenant_safari", Name: "Safaricom client Nairobi", Phone: "254711223344", Email: "saf_client@gmail.com", DeviceID: "item_onu_2", InvoiceID: "inv_safari_1", DispatchStatus: "Pending"}
-	d.Customers["cust_pio_88"] = &types.Customer{ID: "cust_pio_88", TenantID: "tenant_pioneer", Name: "Pioneer Kisumu printer client", Phone: "254755667788", Email: "pioneer_client@gmail.com", DeviceID: "item_printer_part", InvoiceID: "inv_pioneer_1", DispatchStatus: "Pending"}
-
-	// Seed some material requests
-	d.MaterialRequests["req_safari_1"] = &types.MaterialRequest{ID: "req_safari_1", TenantID: "tenant_safari", TaskID: "task_safari_install", RequesterID: "usr_safari_tech", ItemName: "Huawei GPON ONU", Status: "Pending_Leader_Approval", Timestamp: time.Now()}
-
-	// 4. Seed Serialized Inventory
-	d.Inventory["item_onu_1"] = &types.InventoryItem{
-		ID: "item_onu_1", TenantID: "tenant_safari", Name: "Huawei GPON ONU", SerialNumber: "SN-HUA-9901", Status: "In_Stock", Region: "Nairobi",
-	}
-	d.Inventory["item_onu_2"] = &types.InventoryItem{
-		ID: "item_onu_2", TenantID: "tenant_safari", Name: "Huawei GPON ONU", SerialNumber: "SN-HUA-9902", Status: "Assigned", AssignedTo: "usr_safari_tech", Region: "Mombasa",
-	}
-	d.Inventory["item_printer_part"] = &types.InventoryItem{
-		ID: "item_printer_part", TenantID: "tenant_pioneer", Name: "LaserJet Fuser Assembly", SerialNumber: "SN-HP-3030", Status: "In_Stock", Region: "Kisumu",
-	}
-
-	// 5. Seed Invoices (Simulating partial payments and balance tracking)
-	d.Invoices["inv_safari_1"] = &types.Invoice{
-		ID: "inv_safari_1", TenantID: "tenant_safari", CustomerID: "cust_saf_77", TotalAmount: 5000.0, PaidAmount: 2000.0, BalanceAmount: 3000.0, Status: "Partially_Paid", Region: "Nairobi",
-	}
-	d.Invoices["inv_pioneer_1"] = &types.Invoice{
-		ID: "inv_pioneer_1", TenantID: "tenant_pioneer", CustomerID: "cust_pio_88", TotalAmount: 15000.0, PaidAmount: 0.0, BalanceAmount: 15000.0, Status: "Approved", Region: "Kisumu",
-	}
-
-	// 6. Seed Tasks & Timesheets
-	d.Tasks["task_safari_install"] = &types.Task{
-		ID: "task_safari_install", TenantID: "tenant_safari", Title: "Fibre Home Installation", AssignedTo: "usr_safari_tech", CreatedBy: "usr_safari_mgr", Status: "In_Progress", Region: "Mombasa",
-	}
-	d.Tasks["task_pioneer_repair"] = &types.Task{
-		ID: "task_pioneer_repair", TenantID: "tenant_pioneer", Title: "Office Copier Repair", AssignedTo: "usr_pioneer_tech", CreatedBy: "usr_pioneer_mgr", Status: "Pending", Region: "Nairobi",
-	}
-
-	d.Timesheets["tsh_safari_1"] = &types.Timesheet{
-		ID: "tsh_safari_1", TenantID: "tenant_safari", TaskID: "task_safari_install", UserID: "usr_safari_tech", Hours: 4.5, Date: time.Now(), Status: "Submitted",
-	}
-
-	return d
+	return hash
 }
 
-// CheckPermission returns true if the given role name (or parent roles) carries the required permission
-func (d *Database) CheckPermission(roleName string, requiredPermission string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+func NewDatabase(pool *pgxpool.Pool) *Database {
+	db := &Database{Pool: pool}
+	db.SeedIfNeeded()
+	return db
+}
+
+func (d *Database) withTx(ctx context.Context, tenantID string, fn func(tx pgx.Tx) error) error {
+	tx, err := d.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Set tenant ID local session configuration for RLS
+	if tenantID != "" {
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (d *Database) CheckPermission(tenantID string, roleName string, permission string) bool {
+	ctx := context.Background()
+	var perms []string
+	var parentRole *string
 
 	current := roleName
-	visited := make(map[string]bool)
-
-	for current != "" {
-		if visited[current] {
-			break // Guard cyclic structures
-		}
-		visited[current] = true
-
-		role, exists := d.Roles[current]
-		if !exists {
+	for i := 0; i < 5 && current != ""; i++ {
+		err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+			row := tx.QueryRow(ctx, "SELECT permissions, parent_role FROM roles WHERE tenant_id = $1 AND name = $2", tenantID, current)
+			return row.Scan(&perms, &parentRole)
+		})
+		if err != nil {
 			break
 		}
 
-		for _, perm := range role.Permissions {
-			if perm == requiredPermission || perm == "*" {
+		for _, p := range perms {
+			if p == "*" || p == permission {
 				return true
 			}
-			// Prefix support (e.g., "inventory:*" matches "inventory:read")
-			if len(perm) > 2 && perm[len(perm)-2:] == ":*" {
-				prefix := perm[:len(perm)-2]
-				reqPrefix := requiredPermission
-				if idx := len(requiredPermission); idx > 0 {
-					// Extract prefix up to colon
-					for i, char := range requiredPermission {
-						if char == ':' {
-							reqPrefix = requiredPermission[:i]
-							break
-						}
-					}
-				}
-				if prefix == reqPrefix {
+			if strings.HasSuffix(p, ":*") {
+				prefix := p[:len(p)-2]
+				if strings.HasPrefix(permission, prefix) {
 					return true
 				}
 			}
 		}
 
-		// Traverse up the parent role hierarchy
-		current = role.ParentRole
+		if parentRole == nil {
+			break
+		}
+		current = *parentRole
 	}
-
 	return false
 }
 
-// UserExists checks if a user exists
 func (d *Database) GetUser(userID string) (*types.User, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	u, exists := d.Users[userID]
-	if !exists {
-		return nil, errors.New("user not found")
+	ctx := context.Background()
+	var u types.User
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, email, role_name, region, password_hash FROM users WHERE id = $1", userID)
+		return row.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return u, nil
+	return &u, nil
 }
 
-// IsSubordinate returns true if managerRole inherited superiority over subordinateRole
-func (d *Database) IsSubordinate(managerRole, subordinateRole string) bool {
+func (d *Database) GetUserByEmail(email string) (*types.User, error) {
+	ctx := context.Background()
+	var u types.User
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, email, role_name, region, password_hash FROM users WHERE LOWER(email) = LOWER($1)", strings.TrimSpace(email))
+		return row.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (d *Database) IsSubordinate(tenantID string, managerRole, subordinateRole string) bool {
 	if managerRole == subordinateRole {
 		return true
 	}
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
+	ctx := context.Background()
 	current := managerRole
-	for current != "" {
-		role, exists := d.Roles[current]
-		if !exists {
+	var parentRole *string
+
+	for i := 0; i < 5 && current != ""; i++ {
+		err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+			row := tx.QueryRow(ctx, "SELECT parent_role FROM roles WHERE tenant_id = $1 AND name = $2", tenantID, current)
+			return row.Scan(&parentRole)
+		})
+		if err != nil {
 			break
 		}
-		if role.ParentRole == subordinateRole {
+		if parentRole == nil {
+			break
+		}
+		if *parentRole == subordinateRole {
 			return true
 		}
-		current = role.ParentRole
+		current = *parentRole
 	}
 	return false
 }
 
-// SaveInventoryItem updates or inserts an inventory item
+func (d *Database) CheckSerialNumberExists(tenantID, serialNumber string) (bool, error) {
+	ctx := context.Background()
+	var exists bool
+	err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM inventory_items WHERE tenant_id = $1 AND serial_number = $2)", tenantID, serialNumber)
+		return row.Scan(&exists)
+	})
+	return exists, err
+}
+
 func (d *Database) SaveInventoryItem(item *types.InventoryItem) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Inventory[item.ID] = item
+	ctx := context.Background()
+	_ = d.withTx(ctx, item.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8)
+			ON CONFLICT (id) DO UPDATE SET
+				name = $3,
+				serial_number = $4,
+				status = $5,
+				assigned_to = NULLIF($6, ''),
+				region = $7,
+				reorder_threshold = $8`,
+			item.ID, item.TenantID, item.Name, item.SerialNumber, item.Status, item.AssignedTo, item.Region, item.ReorderThreshold)
+		return err
+	})
 }
 
-// GetInventoryItem retrieves inventory details
 func (d *Database) GetInventoryItem(id string) (*types.InventoryItem, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	item, exists := d.Inventory[id]
-	if !exists {
-		return nil, fmt.Errorf("item %s not found", id)
+	ctx := context.Background()
+	var item types.InventoryItem
+	var assignedTo *string
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold FROM inventory_items WHERE id = $1", id)
+		return row.Scan(&item.ID, &item.TenantID, &item.Name, &item.SerialNumber, &item.Status, &assignedTo, &item.Region, &item.ReorderThreshold)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return item, nil
+	if assignedTo != nil {
+		item.AssignedTo = *assignedTo
+	}
+	return &item, nil
 }
 
-// SaveInvoice updates or inserts invoice status
 func (d *Database) SaveInvoice(invoice *types.Invoice) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Invoices[invoice.ID] = invoice
+	ctx := context.Background()
+	_ = d.withTx(ctx, invoice.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO invoices (id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (id) DO UPDATE SET
+				customer_id = $3,
+				total_amount = $4,
+				paid_amount = $5,
+				balance_amount = $6,
+				status = $7,
+				region = $8`,
+			invoice.ID, invoice.TenantID, invoice.CustomerID, invoice.TotalAmount, invoice.PaidAmount, invoice.BalanceAmount, invoice.Status, invoice.Region)
+		return err
+	})
 }
 
-// GetInvoice retrieves invoice records
 func (d *Database) GetInvoice(id string) (*types.Invoice, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	inv, exists := d.Invoices[id]
-	if !exists {
-		return nil, fmt.Errorf("invoice %s not found", id)
+	ctx := context.Background()
+	var inv types.Invoice
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region FROM invoices WHERE id = $1", id)
+		return row.Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.TotalAmount, &inv.PaidAmount, &inv.BalanceAmount, &inv.Status, &inv.Region)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return inv, nil
+	return &inv, nil
 }
 
-// SavePayment inserts payment
 func (d *Database) SavePayment(pmt *types.Payment) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Payments[pmt.ID] = pmt
+	ctx := context.Background()
+	_ = d.withTx(ctx, pmt.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO payments (id, tenant_id, invoice_id, amount, payment_method, reference, paid_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (id) DO NOTHING`,
+			pmt.ID, pmt.TenantID, pmt.InvoiceID, pmt.Amount, pmt.PaymentMethod, pmt.Reference, pmt.Date)
+		return err
+	})
 }
 
-// GetTask retrieves a task
 func (d *Database) GetTask(id string) (*types.Task, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	t, exists := d.Tasks[id]
-	if !exists {
-		return nil, fmt.Errorf("task %s not found", id)
+	ctx := context.Background()
+	var t types.Task
+	var assignedTo, dependsOn *string
+	var dueDate *time.Time
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, title, assigned_to, created_by, status, region, due_date, depends_on FROM tasks WHERE id = $1", id)
+		return row.Scan(&t.ID, &t.TenantID, &t.Title, &assignedTo, &t.CreatedBy, &t.Status, &t.Region, &dueDate, &dependsOn)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return t, nil
+	if assignedTo != nil {
+		t.AssignedTo = *assignedTo
+	}
+	if dependsOn != nil {
+		t.DependsOn = *dependsOn
+	}
+	t.DueDate = dueDate
+	return &t, nil
 }
 
-// SaveTask updates task state
 func (d *Database) SaveTask(task *types.Task) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Tasks[task.ID] = task
+	ctx := context.Background()
+	_ = d.withTx(ctx, task.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO tasks (id, tenant_id, title, assigned_to, created_by, status, region, due_date, depends_on)
+			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, NULLIF($9, ''))
+			ON CONFLICT (id) DO UPDATE SET
+				title = $3,
+				assigned_to = NULLIF($4, ''),
+				created_by = $5,
+				status = $6,
+				region = $7,
+				due_date = $8,
+				depends_on = NULLIF($9, '')`,
+			task.ID, task.TenantID, task.Title, task.AssignedTo, task.CreatedBy, task.Status, task.Region, task.DueDate, task.DependsOn)
+		return err
+	})
 }
 
-// GetTimesheet retrieves a timesheet
 func (d *Database) GetTimesheet(id string) (*types.Timesheet, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	t, exists := d.Timesheets[id]
-	if !exists {
-		return nil, fmt.Errorf("timesheet %s not found", id)
+	ctx := context.Background()
+	var ts types.Timesheet
+	var approvedBy *string
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, task_id, user_id, hours, worked_on, status, approved_by FROM timesheets WHERE id = $1", id)
+		return row.Scan(&ts.ID, &ts.TenantID, &ts.TaskID, &ts.UserID, &ts.Hours, &ts.Date, &ts.Status, &approvedBy)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return t, nil
+	if approvedBy != nil {
+		ts.ApprovedBy = *approvedBy
+	}
+	return &ts, nil
 }
 
-// SaveTimesheet updates timesheet state
 func (d *Database) SaveTimesheet(ts *types.Timesheet) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Timesheets[ts.ID] = ts
+	ctx := context.Background()
+	_ = d.withTx(ctx, ts.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO timesheets (id, tenant_id, task_id, user_id, hours, worked_on, status, approved_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''))
+			ON CONFLICT (id) DO UPDATE SET
+				task_id = $3,
+				user_id = $4,
+				hours = $5,
+				worked_on = $6,
+				status = $7,
+				approved_by = NULLIF($8, '')`,
+			ts.ID, ts.TenantID, ts.TaskID, ts.UserID, ts.Hours, ts.Date, ts.Status, ts.ApprovedBy)
+		return err
+	})
 }
 
-// CreateTenant creates a new Tenant dynamically
 func (d *Database) CreateTenant(id, name string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Tenants[id] = &types.Tenant{ID: id, Name: name}
+	ctx := context.Background()
+	_ = d.withTx(ctx, "", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING", id, name)
+		return err
+	})
 }
 
-// CreateUser creates a new User dynamically
-func (d *Database) CreateUser(id, tenantID, name, roleName, region string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Users[id] = &types.User{ID: id, TenantID: tenantID, Name: name, RoleName: roleName, Region: region, Password: "password"}
+func (d *Database) CreateUser(id, tenantID, name, email, roleName, region, passwordHash string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var tExists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)", tenantID).Scan(&tExists)
+		if !tExists {
+			return fmt.Errorf("tenant %s does not exist", tenantID)
+		}
+
+		var rExists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM roles WHERE tenant_id = $1 AND name = $2)", tenantID, roleName).Scan(&rExists)
+		if !rExists {
+			return fmt.Errorf("role %s does not exist", roleName)
+		}
+
+		var emailExists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(email) = LOWER($1))", strings.TrimSpace(email)).Scan(&emailExists)
+		if emailExists {
+			return errors.New("email already registered")
+		}
+
+		_, err := tx.Exec(ctx, `
+			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			id, tenantID, name, strings.ToLower(strings.TrimSpace(email)), roleName, region, passwordHash)
+		return err
+	})
 }
 
-// ResetPasswordTransaction updates user password
-func (d *Database) ResetPasswordTransaction(userID, newPassword string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	u, exists := d.Users[userID]
-	if !exists {
-		return errors.New("user not found")
+func (d *Database) RegisterUserTransaction(id, tenantID, tenantName, name, email, region, passwordHash string) (*types.User, error) {
+	ctx := context.Background()
+	var user types.User
+	user.ID = id
+	user.TenantID = tenantID
+	user.Name = name
+	user.Email = strings.ToLower(strings.TrimSpace(email))
+	user.Region = region
+	user.PasswordHash = passwordHash
+
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		var emailExists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(email) = LOWER($1))", user.Email).Scan(&emailExists)
+		if emailExists {
+			return errors.New("email already registered")
+		}
+
+		roleName := "field_technician"
+		var tenantExists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)", tenantID).Scan(&tenantExists)
+		if !tenantExists {
+			_, err := tx.Exec(ctx, "INSERT INTO tenants (id, name) VALUES ($1, $2)", tenantID, tenantName)
+			if err != nil {
+				return err
+			}
+
+			defaultRoles := []struct {
+				Name        string
+				ParentRole  string
+				Permissions []string
+			}{
+				{"field_technician", "", []string{"inventory:read", "tasks:read", "timesheets:submit"}},
+				{"finance_officer", "", []string{"finance:read", "finance:write"}},
+				{"manager", "field_technician", []string{"finance:read", "tasks:create", "tasks:approve", "timesheets:approve"}},
+				{"tenant_admin", "manager", []string{"inventory:*", "finance:*", "tasks:*", "users:*"}},
+			}
+			for _, r := range defaultRoles {
+				_, err = tx.Exec(ctx, "INSERT INTO roles (tenant_id, name, parent_role, permissions) VALUES ($1, $2, NULLIF($3, ''), $4)",
+					tenantID, r.Name, r.ParentRole, r.Permissions)
+				if err != nil {
+					return err
+				}
+			}
+			roleName = "tenant_admin"
+		}
+
+		user.RoleName = roleName
+
+		_, err := tx.Exec(ctx, `
+			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			user.ID, user.TenantID, user.Name, user.Email, user.RoleName, user.Region, user.PasswordHash)
+		return err
+	})
+
+	if err != nil {
+		return nil, err
 	}
-
-	uCopy := *u
-	uCopy.Password = newPassword
-	d.Users[userID] = &uCopy
-	return nil
+	return &user, nil
 }
 
-// CreateMaterialRequestTransaction inserts a material request
+func (d *Database) ResetPasswordTransaction(userID, newPasswordHash string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, "", func(tx pgx.Tx) error {
+		var exists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID).Scan(&exists)
+		if !exists {
+			return errors.New("user not found")
+		}
+		_, err := tx.Exec(ctx, "UPDATE users SET password_hash = $1 WHERE id = $2", newPasswordHash, userID)
+		return err
+	})
+}
+
 func (d *Database) CreateMaterialRequestTransaction(id, tenantID, taskID, requesterID, itemName string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.MaterialRequests[id] = &types.MaterialRequest{
-		ID:          id,
-		TenantID:    tenantID,
-		TaskID:      taskID,
-		RequesterID: requesterID,
-		ItemName:    itemName,
-		Status:      "Pending_Leader_Approval",
-		Timestamp:   time.Now(),
-	}
+	ctx := context.Background()
+	_ = d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO material_requests (id, tenant_id, task_id, requester_id, item_name, status, created_at)
+			VALUES ($1, $2, NULLIF($3, ''), $4, $5, 'Pending_Leader_Approval', $6)`,
+			id, tenantID, taskID, requesterID, itemName, time.Now())
+		return err
+	})
 }
 
-// ApproveMaterialRequestTransaction handles material approvals and procurement fallbacks
 func (d *Database) ApproveMaterialRequestTransaction(id, tenantID, approverID string) (*types.MaterialRequest, *types.ProcurementOrder, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	req, exists := d.MaterialRequests[id]
-	if !exists {
-		return nil, nil, fmt.Errorf("material request %s not found", id)
-	}
-
-	// 1. Check if we have an "In_Stock" inventory item matching the requested item type
-	var foundItem *types.InventoryItem
-	for _, item := range d.Inventory {
-		if item.TenantID == tenantID && item.Name == req.ItemName && item.Status == "In_Stock" {
-			foundItem = item
-			break
-		}
-	}
-
-	reqCopy := *req
+	ctx := context.Background()
+	var req types.MaterialRequest
 	var procOrder *types.ProcurementOrder
+	var requesterID string
+	var itemName string
+	var taskID *string
 
-	if foundItem != nil {
-		// Fulfill material request from current in-stock inventory
-		itemCopy := *foundItem
-		itemCopy.Status = "Assigned"
-		itemCopy.AssignedTo = req.RequesterID
-		d.Inventory[foundItem.ID] = &itemCopy
-
-		reqCopy.Status = "Fulfilled"
-		reqCopy.AllocatedSN = foundItem.SerialNumber
-		d.MaterialRequests[id] = &reqCopy
-	} else {
-		// Out of stock fallback! Trigger Procurement workflow
-		reqCopy.Status = "Procuring"
-		d.MaterialRequests[id] = &reqCopy
-
-		procID := "proc_" + id
-		procOrder = &types.ProcurementOrder{
-			ID:           procID,
-			TenantID:     tenantID,
-			RequestID:    id,
-			ItemName:     req.ItemName,
-			ExpectedTime: time.Now().Add(10 * 24 * time.Hour), // 10-days timeline
-			Status:       "Bidding",
+	err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, "SELECT task_id, requester_id, item_name FROM material_requests WHERE id = $1 AND tenant_id = $2", id, tenantID).
+			Scan(&taskID, &requesterID, &itemName)
+		if err != nil {
+			return fmt.Errorf("material request %s not found", id)
 		}
-		d.ProcurementOrders[procID] = procOrder
-	}
 
-	return &reqCopy, procOrder, nil
+		var itemID, serialNumber, region string
+		err = tx.QueryRow(ctx, "SELECT id, serial_number, region FROM inventory_items WHERE tenant_id = $1 AND name = $2 AND status = 'In_Stock' LIMIT 1", tenantID, itemName).
+			Scan(&itemID, &serialNumber, &region)
+
+		if err == nil {
+			_, err = tx.Exec(ctx, "UPDATE inventory_items SET status = 'Assigned', assigned_to = $1 WHERE id = $2", requesterID, itemID)
+			if err != nil {
+				return err
+			}
+
+			_, err = tx.Exec(ctx, `
+				INSERT INTO inventory_history (tenant_id, item_id, from_status, to_status, changed_by, changed_at)
+				VALUES ($1, $2, $3, $4, $5, $6)`,
+				tenantID, itemID, "In_Stock", "Assigned", approverID, time.Now())
+			if err != nil {
+				return err
+			}
+
+			_, err = tx.Exec(ctx, "UPDATE material_requests SET status = 'Fulfilled', allocated_sn = $1 WHERE id = $2", serialNumber, id)
+			if err != nil {
+				return err
+			}
+
+			var tID string
+			if taskID != nil {
+				tID = *taskID
+			}
+
+			req = types.MaterialRequest{
+				ID:          id,
+				TenantID:    tenantID,
+				TaskID:      tID,
+				RequesterID: requesterID,
+				ItemName:    itemName,
+				Status:      "Fulfilled",
+				AllocatedSN: serialNumber,
+				Timestamp:   time.Now(),
+			}
+
+			var inStockCount int
+			_ = tx.QueryRow(ctx, "SELECT COUNT(*) FROM inventory_items WHERE tenant_id = $1 AND name = $2 AND status = 'In_Stock'", tenantID, itemName).Scan(&inStockCount)
+
+			var threshold int
+			_ = tx.QueryRow(ctx, "SELECT reorder_threshold FROM inventory_items WHERE id = $1", itemID).Scan(&threshold)
+
+			if inStockCount <= threshold {
+				var exists bool
+				_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM procurement_orders WHERE tenant_id = $1 AND item_name = $2 AND status = 'Bidding')", tenantID, itemName).Scan(&exists)
+				if !exists {
+					procID := "proc_auto_" + uuid.New().String()[:8]
+					_, _ = tx.Exec(ctx, `
+						INSERT INTO procurement_orders (id, tenant_id, request_id, item_name, expected_time, status)
+						VALUES ($1, $2, NULL, $3, $4, 'Bidding')`,
+						procID, tenantID, itemName, time.Now().Add(10 * 24 * time.Hour))
+				}
+			}
+
+		} else {
+			_, err = tx.Exec(ctx, "UPDATE material_requests SET status = 'Procuring' WHERE id = $1", id)
+			if err != nil {
+				return err
+			}
+
+			procID := "proc_" + id
+			_, err = tx.Exec(ctx, `
+				INSERT INTO procurement_orders (id, tenant_id, request_id, item_name, expected_time, status)
+				VALUES ($1, $2, $3, $4, $5, 'Bidding')
+				ON CONFLICT (id) DO UPDATE SET status = 'Bidding'`,
+				procID, tenantID, id, itemName, time.Now().Add(10*24*time.Hour))
+			if err != nil {
+				return err
+			}
+
+			var tID string
+			if taskID != nil {
+				tID = *taskID
+			}
+
+			req = types.MaterialRequest{
+				ID:          id,
+				TenantID:    tenantID,
+				TaskID:      tID,
+				RequesterID: requesterID,
+				ItemName:    itemName,
+				Status:      "Procuring",
+				Timestamp:   time.Now(),
+			}
+
+			procOrder = &types.ProcurementOrder{
+				ID:           procID,
+				TenantID:     tenantID,
+				RequestID:    id,
+				ItemName:     itemName,
+				ExpectedTime: time.Now().Add(10 * 24 * time.Hour),
+				Status:       "Bidding",
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, nil, err
+	}
+	return &req, procOrder, nil
 }
 
-// CreateCustomerTransaction registers a client dynamically
 func (d *Database) CreateCustomerTransaction(id, tenantID, name, phone, email string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Customers[id] = &types.Customer{
-		ID:             id,
-		TenantID:       tenantID,
-		Name:           name,
-		Phone:          phone,
-		Email:          email,
-		DispatchStatus: "Pending",
-	}
+	ctx := context.Background()
+	_ = d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO customers (id, tenant_id, name, phone, email, dispatch_status)
+			VALUES ($1, $2, $3, $4, $5, 'Pending')`,
+			id, tenantID, name, phone, email)
+		return err
+	})
 }
 
-// UpdateCustomerDeviceTransaction binds invoice, serial ONU router device, and sets dispatch state
 func (d *Database) UpdateCustomerDeviceTransaction(id, deviceID, invoiceID, dispatchStatus string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	ctx := context.Background()
+	var tenantID string
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, "SELECT tenant_id FROM customers WHERE id = $1", id).Scan(&tenantID)
+		if err != nil {
+			return fmt.Errorf("customer %s not found", id)
+		}
 
-	cust, exists := d.Customers[id]
-	if !exists {
-		return fmt.Errorf("customer %s not found", id)
-	}
-
-	custCopy := *cust
-	custCopy.DeviceID = deviceID
-	custCopy.InvoiceID = invoiceID
-	custCopy.DispatchStatus = dispatchStatus
-	d.Customers[id] = &custCopy
-	return nil
+		_, err = tx.Exec(ctx, `
+			UPDATE customers
+			SET device_id = NULLIF($1, ''), invoice_id = NULLIF($2, ''), dispatch_status = $3
+			WHERE id = $4 AND tenant_id = $5`,
+			deviceID, invoiceID, dispatchStatus, id, tenantID)
+		return err
+	})
+	return err
 }
 
-// UpdateRolePermissions allows interactive toggling of RBAC permissions from the UI console
-func (d *Database) UpdateRolePermissions(roleName string, permissions []string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if r, exists := d.Roles[roleName]; exists {
-		r.Permissions = permissions
-	}
+func (d *Database) UpdateRolePermissions(tenantID string, roleName string, permissions []string) {
+	ctx := context.Background()
+	_ = d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE roles SET permissions = $1 WHERE tenant_id = $2 AND name = $3", permissions, tenantID, roleName)
+		return err
+	})
 }
 
-// AllocateInventoryItemTransaction allocates a serialized device under safe write lock protection
 func (d *Database) AllocateInventoryItemTransaction(id string, assignedTo string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	item, exists := d.Inventory[id]
-	if !exists {
-		return fmt.Errorf("item %s not found", id)
-	}
+	ctx := context.Background()
+	return d.withTx(ctx, "", func(tx pgx.Tx) error {
+		var tenantID, fromStatus string
+		err := tx.QueryRow(ctx, "SELECT tenant_id, status FROM inventory_items WHERE id = $1", id).Scan(&tenantID, &fromStatus)
+		if err != nil {
+			return fmt.Errorf("item %s not found", id)
+		}
 
-	// Clone to avoid pointer data race under concurrent UI reads
-	itemCopy := *item
-	itemCopy.Status = "Assigned"
-	itemCopy.AssignedTo = assignedTo
-	d.Inventory[id] = &itemCopy
-	return nil
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, "UPDATE inventory_items SET status = 'Assigned', assigned_to = $1 WHERE id = $2 AND tenant_id = $3", assignedTo, id, tenantID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO inventory_history (tenant_id, item_id, from_status, to_status, changed_by, changed_at)
+			VALUES ($1, $2, $3, 'Assigned', $4, $5)`,
+			tenantID, id, fromStatus, assignedTo, time.Now())
+		return err
+	})
 }
 
-// ApplyPaymentTransaction updates invoice status and outstanding balance under safe lock
 func (d *Database) ApplyPaymentTransaction(id string, amount float64) (*types.Invoice, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	inv, exists := d.Invoices[id]
-	if !exists {
-		return nil, fmt.Errorf("invoice %s not found", id)
-	}
+	ctx := context.Background()
+	var inv types.Invoice
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		var tenantID string
+		err := tx.QueryRow(ctx, "SELECT tenant_id FROM invoices WHERE id = $1", id).Scan(&tenantID)
+		if err != nil {
+			return fmt.Errorf("invoice %s not found", id)
+		}
 
-	invCopy := *inv
-	invCopy.PaidAmount += amount
-	invCopy.BalanceAmount = invCopy.TotalAmount - invCopy.PaidAmount
-	if invCopy.BalanceAmount <= 0 {
-		invCopy.Status = "Paid"
-	} else {
-		invCopy.Status = "Partially_Paid"
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			return err
+		}
+
+		err = tx.QueryRow(ctx, `
+			UPDATE invoices
+			SET paid_amount = paid_amount + $1,
+			    balance_amount = total_amount - (paid_amount + $1),
+			    status = CASE WHEN total_amount - (paid_amount + $1) <= 0 THEN 'Paid' ELSE 'Partially_Paid' END
+			WHERE id = $2 AND tenant_id = $3
+			RETURNING id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region`,
+			amount, id, tenantID).
+			Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.TotalAmount, &inv.PaidAmount, &inv.BalanceAmount, &inv.Status, &inv.Region)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	d.Invoices[id] = &invCopy
-	return &invCopy, nil
+	return &inv, nil
 }
 
-// ApproveTimesheetTransaction approves technician hours under safe lock
 func (d *Database) ApproveTimesheetTransaction(id string, approvedBy string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	ts, exists := d.Timesheets[id]
-	if !exists {
-		return fmt.Errorf("timesheet %s not found", id)
-	}
+	ctx := context.Background()
+	return d.withTx(ctx, "", func(tx pgx.Tx) error {
+		var tenantID string
+		err := tx.QueryRow(ctx, "SELECT tenant_id FROM timesheets WHERE id = $1", id).Scan(&tenantID)
+		if err != nil {
+			return fmt.Errorf("timesheet %s not found", id)
+		}
 
-	tsCopy := *ts
-	tsCopy.Status = "Approved"
-	tsCopy.ApprovedBy = approvedBy
-	d.Timesheets[id] = &tsCopy
-	return nil
+		_, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, "UPDATE timesheets SET status = 'Approved', approved_by = $1 WHERE id = $2 AND tenant_id = $3", approvedBy, id, tenantID)
+		return err
+	})
 }
 
-// GetRoles returns a thread-safe deep copy of the roles map
-func (d *Database) GetRoles() map[string][]string {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+func (d *Database) GetRolesForTenant(tenantID string) map[string][]string {
+	ctx := context.Background()
+	roles := make(map[string][]string)
+	_ = d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT name, permissions FROM roles WHERE tenant_id = $1", tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
 
-	rolesCopy := make(map[string][]string)
-	for name, r := range d.Roles {
-		permsCopy := make([]string, len(r.Permissions))
-		copy(permsCopy, r.Permissions)
-		rolesCopy[name] = permsCopy
-	}
-	return rolesCopy
+		for rows.Next() {
+			var name string
+			var perms []string
+			if err := rows.Scan(&name, &perms); err == nil {
+				roles[name] = perms
+			}
+		}
+		return nil
+	})
+	return roles
 }
 
-// GetState returns thread-safe deep copy of ERP collections
-func (d *Database) GetState() map[string]interface{} {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
+	ctx := context.Background()
 
-	inventoryCopy := make(map[string]*types.InventoryItem)
-	for k, v := range d.Inventory {
-		inventoryCopy[k] = v
-	}
+	var (
+		mu                sync.Mutex
+		tenants           = make(map[string]*types.Tenant)
+		users             = make(map[string]*types.User)
+		inventory         = make(map[string]*types.InventoryItem)
+		invoices          = make(map[string]*types.Invoice)
+		tasks             = make(map[string]*types.Task)
+		timesheets        = make(map[string]*types.Timesheet)
+		customers         = make(map[string]*types.Customer)
+		materialRequests  = make(map[string]*types.MaterialRequest)
+		procurementOrders = make(map[string]*types.ProcurementOrder)
+	)
 
-	invoicesCopy := make(map[string]*types.Invoice)
-	for k, v := range d.Invoices {
-		invoicesCopy[k] = v
-	}
+	g, gCtx := errgroup.WithContext(ctx)
 
-	tasksCopy := make(map[string]*types.Task)
-	for k, v := range d.Tasks {
-		tasksCopy[k] = v
-	}
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, name FROM tenants WHERE id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var t types.Tenant
+				if err := rows.Scan(&t.ID, &t.Name); err == nil {
+					mu.Lock()
+					tenants[t.ID] = &t
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
 
-	timesheetsCopy := make(map[string]*types.Timesheet)
-	for k, v := range d.Timesheets {
-		timesheetsCopy[k] = v
-	}
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, name, email, role_name, region, password_hash FROM users WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var u types.User
+				if err := rows.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash); err == nil {
+					mu.Lock()
+					users[u.ID] = &u
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
 
-	customersCopy := make(map[string]*types.Customer)
-	for k, v := range d.Customers {
-		customersCopy[k] = v
-	}
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold FROM inventory_items WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var item types.InventoryItem
+				var assignedTo *string
+				if err := rows.Scan(&item.ID, &item.TenantID, &item.Name, &item.SerialNumber, &item.Status, &assignedTo, &item.Region, &item.ReorderThreshold); err == nil {
+					if assignedTo != nil {
+						item.AssignedTo = *assignedTo
+					}
+					mu.Lock()
+					inventory[item.ID] = &item
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
 
-	materialCopy := make(map[string]*types.MaterialRequest)
-	for k, v := range d.MaterialRequests {
-		materialCopy[k] = v
-	}
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region FROM invoices WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var inv types.Invoice
+				if err := rows.Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.TotalAmount, &inv.PaidAmount, &inv.BalanceAmount, &inv.Status, &inv.Region); err == nil {
+					mu.Lock()
+					invoices[inv.ID] = &inv
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
 
-	procureCopy := make(map[string]*types.ProcurementOrder)
-	for k, v := range d.ProcurementOrders {
-		procureCopy[k] = v
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, title, assigned_to, created_by, status, region, due_date, depends_on FROM tasks WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var t types.Task
+				var assignedTo, dependsOn *string
+				var dueDate *time.Time
+				if err := rows.Scan(&t.ID, &t.TenantID, &t.Title, &assignedTo, &t.CreatedBy, &t.Status, &t.Region, &dueDate, &dependsOn); err == nil {
+					if assignedTo != nil {
+						t.AssignedTo = *assignedTo
+					}
+					if dependsOn != nil {
+						t.DependsOn = *dependsOn
+					}
+					t.DueDate = dueDate
+					mu.Lock()
+					tasks[t.ID] = &t
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, task_id, user_id, hours, worked_on, status, approved_by FROM timesheets WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var ts types.Timesheet
+				var approvedBy *string
+				if err := rows.Scan(&ts.ID, &ts.TenantID, &ts.TaskID, &ts.UserID, &ts.Hours, &ts.Date, &ts.Status, &approvedBy); err == nil {
+					if approvedBy != nil {
+						ts.ApprovedBy = *approvedBy
+					}
+					mu.Lock()
+					timesheets[ts.ID] = &ts
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, name, phone, email, device_id, invoice_id, dispatch_status FROM customers WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var c types.Customer
+				var deviceID, invoiceID *string
+				if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.Phone, &c.Email, &deviceID, &invoiceID, &c.DispatchStatus); err == nil {
+					if deviceID != nil {
+						c.DeviceID = *deviceID
+					}
+					if invoiceID != nil {
+						c.InvoiceID = *invoiceID
+					}
+					mu.Lock()
+					customers[c.ID] = &c
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, task_id, requester_id, item_name, status, allocated_sn, created_at FROM material_requests WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var m types.MaterialRequest
+				var allocatedSN, taskID *string
+				if err := rows.Scan(&m.ID, &m.TenantID, &taskID, &m.RequesterID, &m.ItemName, &m.Status, &allocatedSN, &m.Timestamp); err == nil {
+					if allocatedSN != nil {
+						m.AllocatedSN = *allocatedSN
+					}
+					if taskID != nil {
+						m.TaskID = *taskID
+					}
+					mu.Lock()
+					materialRequests[m.ID] = &m
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, request_id, item_name, expected_time, status FROM procurement_orders WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var p types.ProcurementOrder
+				var requestID *string
+				if err := rows.Scan(&p.ID, &p.TenantID, &requestID, &p.ItemName, &p.ExpectedTime, &p.Status); err == nil {
+					if requestID != nil {
+						p.RequestID = *requestID
+					}
+					mu.Lock()
+					procurementOrders[p.ID] = &p
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	if err := g.Wait(); err != nil {
+		log.Printf("GetStateForTenant background query error: %v", err)
 	}
 
 	return map[string]interface{}{
-		"tenants":            d.Tenants,
-		"users":              d.Users,
-		"inventory":          inventoryCopy,
-		"invoices":           invoicesCopy,
-		"tasks":              tasksCopy,
-		"timesheets":         timesheetsCopy,
-		"customers":          customersCopy,
-		"material_requests":  materialCopy,
-		"procurement_orders": procureCopy,
+		"tenants":            tenants,
+		"users":              users,
+		"inventory":          inventory,
+		"invoices":           invoices,
+		"tasks":              tasks,
+		"timesheets":         timesheets,
+		"customers":          customers,
+		"material_requests":  materialRequests,
+		"procurement_orders": procurementOrders,
 	}
+}
+
+func (d *Database) SeedIfNeeded() {
+	ctx := context.Background()
+	var count int
+	err := d.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM tenants").Scan(&count)
+	if err == nil && count > 0 {
+		return
+	}
+
+	log.Println("Database is empty. Seeding initial multi-tenant default data...")
+
+	d.CreateTenant("tenant_safari", "Safaricom ISP Services")
+	d.CreateTenant("tenant_pioneer", "Pioneer Printer Maintenance")
+
+	safariRoles := []struct {
+		Name        string
+		ParentRole  string
+		Permissions []string
+	}{
+		{"field_technician", "", []string{"inventory:read", "tasks:read", "timesheets:submit"}},
+		{"finance_officer", "", []string{"finance:read", "finance:write"}},
+		{"manager", "field_technician", []string{"finance:read", "tasks:create", "tasks:approve", "timesheets:approve"}},
+		{"tenant_admin", "manager", []string{"inventory:*", "finance:*", "tasks:*", "users:*"}},
+	}
+	for _, r := range safariRoles {
+		_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, "INSERT INTO roles (tenant_id, name, parent_role, permissions) VALUES ($1, $2, NULLIF($3, ''), $4) ON CONFLICT DO NOTHING",
+				"tenant_safari", r.Name, r.ParentRole, r.Permissions)
+			return err
+		})
+	}
+
+	for _, r := range safariRoles {
+		_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, "INSERT INTO roles (tenant_id, name, parent_role, permissions) VALUES ($1, $2, NULLIF($3, ''), $4) ON CONFLICT DO NOTHING",
+				"tenant_pioneer", r.Name, r.ParentRole, r.Permissions)
+			return err
+		})
+	}
+
+	seedHash := mustHashSeedPassword("ChangeMe123!")
+
+	_ = d.CreateUser("usr_safari_admin", "tenant_safari", "Alice Admin", "alice@safari.test", "tenant_admin", "Nairobi", seedHash)
+	_ = d.CreateUser("usr_safari_mgr", "tenant_safari", "Bob Manager", "bob@safari.test", "manager", "Nairobi", seedHash)
+	_ = d.CreateUser("usr_safari_tech", "tenant_safari", "Charlie Tech", "charlie@safari.test", "field_technician", "Mombasa", seedHash)
+
+	_ = d.CreateUser("usr_pioneer_mgr", "tenant_pioneer", "Daniel Manager", "daniel@pioneer.test", "manager", "Kisumu", seedHash)
+	_ = d.CreateUser("usr_pioneer_fin", "tenant_pioneer", "Eva Finance", "eva@pioneer.test", "finance_officer", "Kisumu", seedHash)
+	_ = d.CreateUser("usr_pioneer_tech", "tenant_pioneer", "Frank Tech", "frank@pioneer.test", "field_technician", "Nairobi", seedHash)
+
+	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO customers (id, tenant_id, name, phone, email, dispatch_status) VALUES ('cust_saf_77', 'tenant_safari', 'Safaricom client Nairobi', '254711223344', 'saf_client@gmail.com', 'Pending') ON CONFLICT DO NOTHING")
+		return err
+	})
+	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO customers (id, tenant_id, name, phone, email, dispatch_status) VALUES ('cust_pio_88', 'tenant_pioneer', 'Pioneer Kisumu printer client', '254755667788', 'pioneer_client@gmail.com', 'Pending') ON CONFLICT DO NOTHING")
+		return err
+	})
+
+	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO material_requests (id, tenant_id, requester_id, item_name, status, created_at) VALUES ('req_safari_1', 'tenant_safari', 'usr_safari_tech', 'Huawei GPON ONU', 'Pending_Leader_Approval', NOW()) ON CONFLICT DO NOTHING")
+		return err
+	})
+
+	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold) VALUES ('item_onu_1', 'tenant_safari', 'Huawei GPON ONU', 'SN-HUA-9901', 'In_Stock', NULL, 'Nairobi', 1) ON CONFLICT DO NOTHING")
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold) VALUES ('item_onu_2', 'tenant_safari', 'Huawei GPON ONU', 'SN-HUA-9902', 'Assigned', 'usr_safari_tech', 'Mombasa', 1) ON CONFLICT DO NOTHING")
+		return err
+	})
+	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold) VALUES ('item_printer_part', 'tenant_pioneer', 'LaserJet Fuser Assembly', 'SN-HP-3030', 'In_Stock', NULL, 'Kisumu', 1) ON CONFLICT DO NOTHING")
+		return err
+	})
+
+	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO invoices (id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region) VALUES ('inv_safari_1', 'tenant_safari', 'cust_saf_77', 5000.0, 2000.0, 3000.0, 'Partially_Paid', 'Nairobi') ON CONFLICT DO NOTHING")
+		return err
+	})
+	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO invoices (id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region) VALUES ('inv_pioneer_1', 'tenant_pioneer', 'cust_pio_88', 15000.0, 0.0, 15000.0, 'Approved', 'Kisumu') ON CONFLICT DO NOTHING")
+		return err
+	})
+
+	_ = d.UpdateCustomerDeviceTransaction("cust_saf_77", "item_onu_2", "inv_safari_1", "Pending")
+	_ = d.UpdateCustomerDeviceTransaction("cust_pio_88", "item_printer_part", "inv_pioneer_1", "Pending")
+
+	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO tasks (id, tenant_id, title, assigned_to, created_by, status, region, due_date) VALUES ('task_safari_install', 'tenant_safari', 'Fibre Home Installation', 'usr_safari_tech', 'usr_safari_mgr', 'In_Progress', 'Mombasa', CURRENT_DATE + 5) ON CONFLICT DO NOTHING")
+		return err
+	})
+	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO tasks (id, tenant_id, title, assigned_to, created_by, status, region, due_date) VALUES ('task_pioneer_repair', 'tenant_pioneer', 'Office Copier Repair', 'usr_pioneer_tech', 'usr_pioneer_mgr', 'Pending', 'Nairobi', CURRENT_DATE + 2) ON CONFLICT DO NOTHING")
+		return err
+	})
+
+	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO timesheets (id, tenant_id, task_id, user_id, hours, worked_on, status) VALUES ('tsh_safari_1', 'tenant_safari', 'task_safari_install', 'usr_safari_tech', 4.5, CURRENT_DATE, 'Submitted') ON CONFLICT DO NOTHING")
+		return err
+	})
 }

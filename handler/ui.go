@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"erp-event-bus/auth"
 	"erp-event-bus/db"
+	"erp-event-bus/middleware"
 )
 
 type UIHandler struct {
@@ -32,6 +35,7 @@ type CreateUserPayload struct {
 	ID       string `json:"id"`
 	TenantID string `json:"tenant_id"`
 	Name     string `json:"name"`
+	Email    string `json:"email"`
 	RoleName string `json:"role_name"`
 	Region   string `json:"region"`
 }
@@ -58,28 +62,48 @@ func (h *UIHandler) CreateTenant(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Tenant registered successfully"})
 }
 
-// CreateUserHandler creates a new user dynamically
+// CreateUserHandler lets an authenticated tenant_admin add a teammate.
+// Gated behind the users:* permission in main.go — trusts the caller's
+// choice of role, unlike the public self-service RegisterHandler.
 func (h *UIHandler) CreateUser(c echo.Context) error {
 	var payload CreateUserPayload
 	if err := c.Bind(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	if payload.ID == "" || payload.TenantID == "" || payload.Name == "" || payload.RoleName == "" || payload.Region == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "All user registration fields are required"})
+	if payload.ID == "" || payload.TenantID == "" || payload.Name == "" || payload.Email == "" || payload.RoleName == "" || payload.Region == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id, tenant_id, name, email, role_name, and region are all required"})
 	}
 
-	h.db.CreateUser(payload.ID, payload.TenantID, payload.Name, payload.RoleName, payload.Region)
+	tempPassword := uuid.NewString()[:12]
+	hash, err := auth.HashPassword(tempPassword)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to provision credentials"})
+	}
+
+	if err := h.db.CreateUser(payload.ID, payload.TenantID, payload.Name, payload.Email, payload.RoleName, payload.Region, hash); err != nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	}
 	h.sqliteDB.Log(payload.TenantID, "SYSTEM", "CreateUser_Success", fmt.Sprintf("User %s (%s) registered under tenant %s", payload.Name, payload.RoleName, payload.TenantID))
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "User registered successfully"})
+	// Temp password is returned exactly once and never logged or stored in
+	// plaintext — the new user must reset it (or admin re-issues) if lost.
+	return c.JSON(http.StatusOK, map[string]string{
+		"message":       "User registered successfully",
+		"temp_password": tempPassword,
+	})
 }
 
-// GetState returns the current in-memory DB state for UI rendering
+// GetState returns current in-memory DB state for UI rendering, scoped to
+// the caller's own tenant — previously this returned every tenant's users,
+// invoices, and inventory to any authenticated caller regardless of role.
 func (h *UIHandler) GetState(c echo.Context) error {
-	state := h.db.GetState()
-	// Add roles definition to state so UI policy manager can see active permissions
-	state["roles"] = h.db.GetRoles()
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	state := h.db.GetStateForTenant(tenantID)
+	// Roles are global permission definitions, not tenant data, so it's safe
+	// to include them unfiltered — the UI needs the full set to render the
+	// RBAC policy grid.
+	state["roles"] = h.db.GetRolesForTenant(tenantID)
 	return c.JSON(http.StatusOK, state)
 }
 
@@ -90,34 +114,31 @@ func (h *UIHandler) UpdateRBAC(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	h.db.UpdateRolePermissions(payload.RoleName, payload.Permissions)
-
-	tenantID := c.Request().Header.Get("Authorization-Tenant-Id")
-	userID := c.Request().Header.Get("Authorization-User-Id")
-	if tenantID == "" {
-		tenantID = "tenant_safari"
-	}
-	if userID == "" {
-		userID = "usr_safari_admin"
-	}
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	h.db.UpdateRolePermissions(tenantID, payload.RoleName, payload.Permissions)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
 
 	h.sqliteDB.Log(tenantID, userID, "UpdateRBAC_Success", fmt.Sprintf("Role '%s' permissions updated dynamically to %v", payload.RoleName, payload.Permissions))
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Permissions updated successfully"})
 }
 
-// GetLogs returns live SQLite audit logs
+// GetLogs returns live SQLite audit logs, scoped to the caller's own
+// tenant — this used to return the full cross-tenant audit trail to any
+// authenticated caller.
 func (h *UIHandler) GetLogs(c echo.Context) error {
-	logs, err := h.sqliteDB.GetLogs()
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	logs, err := h.sqliteDB.GetLogsForTenant(tenantID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, logs)
 }
 
-// ExportLogsExcel downloads the beautiful Excel audit sheet
+// ExportLogsExcel downloads the audit sheet for the caller's own tenant.
 func (h *UIHandler) ExportLogsExcel(c echo.Context) error {
-	logs, err := h.sqliteDB.GetLogs()
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	logs, err := h.sqliteDB.GetLogsForTenant(tenantID)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
@@ -167,28 +188,27 @@ const htmlContent = `
             <div class="text-center space-y-2">
                 <i class="fa-solid fa-network-wired text-emerald-400 text-5xl"></i>
                 <h2 class="text-2xl font-bold tracking-wide text-white">SME Kenya ERP Login</h2>
-                <p class="text-sm text-slate-300">Choose your workspace user profile or register below</p>
+                <p class="text-sm text-slate-300">Sign in with your workspace email, or register below</p>
             </div>
 
             <form onsubmit="handleLogin(event)" class="space-y-4">
                 <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">Select Active User Profile</label>
-                    <select id="loginUserSelect" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none">
-                    </select>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">Email</label>
+                    <input type="email" id="loginEmail" placeholder="alice@safari.test" required autocomplete="username" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
                 </div>
                 <div>
-                    <label class="block text-xs font-bold text-slate-400 mb-1">Enter Workspace Password</label>
-                    <input type="password" id="loginPassword" placeholder="e.g. admin or password" required class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                    <label class="block text-xs font-bold text-slate-400 mb-1">Password</label>
+                    <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
                 </div>
+                <div id="loginError" class="hidden text-xs text-rose-400 font-semibold"></div>
 
                 <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition duration-200 shadow-md">
                     Enter Workspace
                 </button>
             </form>
 
-            <div class="border-t border-brand-600 pt-4 flex justify-between text-xs font-semibold text-emerald-400">
-                <button onclick="openRegisterTenantModal()" class="hover:underline">Register New Tenant</button>
-                <button onclick="openRegisterUserModal()" class="hover:underline">Create User Profile</button>
+            <div class="border-t border-brand-600 pt-4 text-center text-xs font-semibold text-emerald-400">
+                <button onclick="openRegisterModal()" class="hover:underline">Create an account</button>
             </div>
         </div>
     </div>
@@ -310,6 +330,32 @@ const htmlContent = `
                         </div>
                     </div>
 
+                    <!-- Overdue Tasks Section (Task 4) -->
+                    <div id="overdueTasksSection" class="bg-red-950 border border-red-700 rounded-xl p-6 hidden">
+                        <h3 class="font-bold text-lg text-red-400 mb-2 flex items-center space-x-2">
+                            <i class="fa-solid fa-triangle-exclamation text-red-400 animate-pulse"></i>
+                            <span>CRITICAL: Overdue Tasks Alert</span>
+                        </h3>
+                        <p class="text-sm text-red-200 mb-4">The following tasks have passed their due date without being Completed or Approved. Please assign immediate resources or resolve blockers.</p>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-xs text-red-200">
+                                <thead>
+                                    <tr class="border-b border-red-700 text-red-300 font-bold uppercase tracking-wider">
+                                        <th class="py-2 px-3">Task ID</th>
+                                        <th class="py-2 px-3">Title</th>
+                                        <th class="py-2 px-3">Assignee</th>
+                                        <th class="py-2 px-3">Region</th>
+                                        <th class="py-2 px-3">Due Date</th>
+                                        <th class="py-2 px-3">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="overdueTasksTableBody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
                         <div class="lg:col-span-8 bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
                             <h3 class="font-bold text-lg text-emerald-300 mb-2 flex items-center space-x-2">
@@ -317,9 +363,9 @@ const htmlContent = `
                                 <span>Policy Shield Verification Activity</span>
                             </h3>
                             <p class="text-sm text-slate-300 mb-4">Every action on the dashboard requires both client-side and backend NATS-coupled validation checks. Switching personas changes what is accessible.</p>
-                            <a href="/api/exports/excel" target="_blank" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 px-4 rounded-lg transition duration-200">
+                            <button onclick="downloadAuditExcel()" class="inline-block bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 px-4 rounded-lg transition duration-200">
                                 <i class="fa-solid fa-download mr-1"></i> Export Live SQLite Log to Excel
-                            </a>
+                            </button>
                         </div>
                         <div class="lg:col-span-4 bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md flex flex-col h-[280px]">
                             <h4 class="font-bold text-xs uppercase text-slate-400 mb-3 tracking-wider">System Live Audit Log</h4>
@@ -582,64 +628,51 @@ const htmlContent = `
     </div>
 
     <!-- REGISTER TENANT MODAL -->
-    <div id="registerTenantModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
+    <div id="registerModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
         <div class="bg-brand-500 rounded-2xl border border-brand-600 p-6 max-w-sm w-full space-y-4">
-            <h4 class="font-bold text-md text-emerald-300">Register New Tenant Subscriber</h4>
-            <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">Tenant ID (Unique Key)</label>
-                <input type="text" id="regTenantId" placeholder="tenant_pioneer" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
-            </div>
-            <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">Tenant Enterprise Name</label>
-                <input type="text" id="regTenantName" placeholder="Pioneer ISP Tech Services" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
-            </div>
-            <div class="flex space-x-2 pt-2 justify-end">
-                <button onclick="closeRegisterTenantModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
-                    Cancel
-                </button>
-                <button onclick="submitTenantRegistration()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 px-4 rounded font-bold">
-                    Submit Registration
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- REGISTER USER MODAL -->
-    <div id="registerUserModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
-        <div class="bg-brand-500 rounded-2xl border border-brand-600 p-6 max-w-sm w-full space-y-4">
-            <h4 class="font-bold text-md text-emerald-300">Create New User Profile</h4>
-            <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">User ID</label>
-                <input type="text" id="regUserId" placeholder="usr_karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
-            </div>
+            <h4 class="font-bold text-md text-emerald-300">Create Your Account</h4>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Full Name</label>
-                <input type="text" id="regUserName" placeholder="David Karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                <input type="text" id="regName" placeholder="David Karanja" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">Select Tenant</label>
-                <select id="regUserTenantSelect" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
-                </select>
+                <label class="block text-xs text-slate-400 font-bold mb-1">Email</label>
+                <input type="email" id="regEmail" placeholder="david@example.com" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
-                <label class="block text-xs text-slate-400 font-bold mb-1">Assign Role</label>
-                <select id="regUserRoleSelect" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
-                    <option value="tenant_admin">tenant_admin (Alice level)</option>
-                    <option value="manager">manager (Bob level)</option>
-                    <option value="finance_officer">finance_officer (Eva level)</option>
-                    <option value="field_technician">field_technician (Charlie level)</option>
-                </select>
+                <label class="block text-xs text-slate-400 font-bold mb-1">Password (min. 8 characters)</label>
+                <input type="password" id="regPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Working Region</label>
-                <input type="text" id="regUserRegion" placeholder="Mombasa" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                <input type="text" id="regRegion" placeholder="Mombasa" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
+
+            <div class="pt-2 border-t border-brand-600 space-y-2">
+                <div class="flex text-xs font-bold text-slate-300 space-x-4">
+                    <label class="flex items-center space-x-1"><input type="radio" name="regMode" value="join" checked onchange="toggleRegisterMode()"> <span>Join existing org</span></label>
+                    <label class="flex items-center space-x-1"><input type="radio" name="regMode" value="create" onchange="toggleRegisterMode()"> <span>Create new org</span></label>
+                </div>
+                <div id="regJoinField">
+                    <label class="block text-xs text-slate-400 font-bold mb-1">Tenant ID to join</label>
+                    <input type="text" id="regTenantId" placeholder="tenant_safari" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                    <p class="text-[10px] text-slate-500 mt-1">You'll join as a field technician; an admin can promote you afterward.</p>
+                </div>
+                <div id="regCreateField" class="hidden">
+                    <label class="block text-xs text-slate-400 font-bold mb-1">New organization name</label>
+                    <input type="text" id="regTenantName" placeholder="Pioneer ISP Tech Services" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                    <p class="text-[10px] text-slate-500 mt-1">You'll become this organization's admin.</p>
+                </div>
+            </div>
+
+            <div id="registerError" class="hidden text-xs text-rose-400 font-semibold"></div>
+
             <div class="flex space-x-2 pt-2 justify-end">
-                <button onclick="closeRegisterUserModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
+                <button onclick="closeRegisterModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
                     Cancel
                 </button>
-                <button onclick="submitUserRegistration()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 px-4 rounded font-bold">
-                    Create Profile
+                <button onclick="submitRegistration()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 px-4 rounded font-bold">
+                    Create Account
                 </button>
             </div>
         </div>
@@ -722,89 +755,152 @@ const htmlContent = `
     <script>
         let currentState = {};
         let currentHeaders = {};
+        let currentUser = {};
+        let authToken = '';
         let activeView = 'dashboard';
         let loggedIn = false;
         let recentNotifications = [];
         let mobileSidebarOpen = false;
 
+        // On page load, try to resume a session from a previously-stored
+        // token rather than forcing a fresh login on every refresh. If the
+        // token is missing/expired, /api/me 401s and we fall through to the
+        // login gate — no state or user list is ever fetched pre-auth.
         async function initAuth() {
+            const saved = sessionStorage.getItem('erp_token');
+            if (!saved) return;
+            authToken = saved;
+            currentHeaders = { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' };
             try {
-                const res = await fetch('/api/state', {
-                    headers: { 'Authorization-Tenant-Id': 'tenant_safari', 'Authorization-User-Id': 'usr_safari_admin', 'Authorization-Roles': 'tenant_admin', 'Authorization-Region': 'Nairobi' }
-                });
-                const data = await res.json();
-                currentState = data;
-
-                const loginSelect = document.getElementById('loginUserSelect');
-                loginSelect.innerHTML = '';
-
-                Object.values(currentState.users || {}).forEach(u => {
-                    const opt = document.createElement('option');
-                    opt.value = u.id;
-                    const tenantName = currentState.tenants[u.tenant_id] ? currentState.tenants[u.tenant_id].name : u.tenant_id;
-                    opt.text = u.name + ' (' + u.role_name + ' @ ' + tenantName + ')';
-                    loginSelect.appendChild(opt);
-                });
+                const res = await fetch('/api/me', { headers: currentHeaders });
+                if (!res.ok) throw new Error('session expired');
+                currentUser = await res.json();
+                await enterWorkspace();
             } catch (err) {
-                console.error('Failed to init auth options:', err);
+                sessionStorage.removeItem('erp_token');
+                authToken = '';
+                currentHeaders = {};
             }
         }
 
-        function handleLogin(e) {
+        function showLoginError(elId, message) {
+            const el = document.getElementById(elId);
+            el.textContent = message;
+            el.classList.remove('hidden');
+        }
+
+        async function handleLogin(e) {
             e.preventDefault();
-            const loginSelect = document.getElementById('loginUserSelect');
-            const selectedUserId = loginSelect.value;
-            const enteredPass = document.getElementById('loginPassword').value;
-            const u = currentState.users[selectedUserId];
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            document.getElementById('loginError').classList.add('hidden');
 
-            if (!u) {
-                alert('Invalid profile selection.');
-                return;
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const r = await res.json();
+                if (!res.ok) {
+                    showLoginError('loginError', r.error || 'Login failed');
+                    return;
+                }
+                authToken = r.token;
+                currentUser = r;
+                sessionStorage.setItem('erp_token', authToken);
+                currentHeaders = { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' };
+                document.getElementById('loginPassword').value = '';
+                await enterWorkspace();
+            } catch (err) {
+                showLoginError('loginError', 'Network error — is the server reachable?');
             }
+        }
 
-            // Validate password credentials (mock auth validation)
-            if (enteredPass !== u.password) {
-                alert('Invalid workspace credentials. Hint: Alice Admin is "admin", other seeded users are "password".');
-                return;
-            }
+        function openRegisterModal() {
+            document.getElementById('registerModal').classList.remove('hidden');
+        }
+        function closeRegisterModal() {
+            document.getElementById('registerModal').classList.add('hidden');
+        }
+        function toggleRegisterMode() {
+            const mode = document.querySelector('input[name="regMode"]:checked').value;
+            document.getElementById('regJoinField').classList.toggle('hidden', mode !== 'join');
+            document.getElementById('regCreateField').classList.toggle('hidden', mode !== 'create');
+        }
 
-            loggedIn = true;
-            currentHeaders = {
-                'Authorization-Tenant-Id': u.tenant_id,
-                'Authorization-User-Id': u.id,
-                'Authorization-Roles': u.role_name,
-                'Authorization-Region': u.region,
-                'Content-Type': 'application/json'
+        async function submitRegistration() {
+            const mode = document.querySelector('input[name="regMode"]:checked').value;
+            const payload = {
+                name: document.getElementById('regName').value,
+                email: document.getElementById('regEmail').value,
+                password: document.getElementById('regPassword').value,
+                region: document.getElementById('regRegion').value,
             };
+            if (mode === 'join') {
+                payload.tenant_id = document.getElementById('regTenantId').value;
+            } else {
+                payload.tenant_name = document.getElementById('regTenantName').value;
+            }
 
-            // Transition screens
+            document.getElementById('registerError').classList.add('hidden');
+            try {
+                const res = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const r = await res.json();
+                if (!res.ok) {
+                    showLoginError('registerError', r.error || 'Registration failed');
+                    return;
+                }
+                authToken = r.token;
+                currentUser = r;
+                sessionStorage.setItem('erp_token', authToken);
+                currentHeaders = { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' };
+                closeRegisterModal();
+                await enterWorkspace();
+            } catch (err) {
+                showLoginError('registerError', 'Network error — is the server reachable?');
+            }
+        }
+
+        // enterWorkspace transitions from the login gate to the dashboard
+        // shell once currentUser/authToken are set (by login, registration,
+        // or session restore), then loads live state.
+        async function enterWorkspace() {
+            loggedIn = true;
             document.getElementById('loginGate').classList.add('hidden');
             document.getElementById('dashboardApp').classList.remove('hidden');
 
-            // Render details inside Sidebar profile box
-            document.getElementById('sidebarUserName').innerText = u.name;
-            document.getElementById('sidebarRoleLabel').innerText = u.role_name;
-            document.getElementById('sidebarAvatar').innerText = u.name.charAt(0);
+            document.getElementById('sidebarUserName').innerText = currentUser.name;
+            document.getElementById('sidebarRoleLabel').innerText = currentUser.role_name;
+            document.getElementById('sidebarAvatar').innerText = currentUser.name.charAt(0);
 
-            const tenantObj = currentState.tenants[u.tenant_id];
-            const tenantNameStr = tenantObj ? tenantObj.name : u.tenant_id;
+            await fetchState();
+            await fetchLogs();
+
+            const tenantObj = currentState.tenants ? currentState.tenants[currentUser.tenant_id] : null;
+            const tenantNameStr = tenantObj ? tenantObj.name : currentUser.tenant_id;
             document.getElementById('sidebarTenantName').innerText = tenantNameStr;
             document.getElementById('mobileTenantTitle').innerText = tenantNameStr;
 
-            pushNotification('SESSION_LOGGED_IN', 'User ' + u.name + ' entered the ' + tenantNameStr + ' workspace.');
-
+            pushNotification('SESSION_LOGGED_IN', 'User ' + currentUser.name + ' entered the ' + tenantNameStr + ' workspace.');
             switchModuleView('dashboard');
-            fetchState();
-            fetchLogs();
         }
 
         function handleLogout() {
             loggedIn = false;
+            authToken = '';
+            currentUser = {};
+            currentHeaders = {};
+            currentState = {};
+            sessionStorage.removeItem('erp_token');
             document.getElementById('loginPassword').value = '';
             document.getElementById('dashboardApp').classList.add('hidden');
             document.getElementById('loginGate').classList.remove('hidden');
             closeMobileSidebar();
-            initAuth();
         }
 
         function toggleMobileSidebar() {
@@ -902,86 +998,6 @@ const htmlContent = `
             });
         }
 
-        function openRegisterTenantModal() {
-            document.getElementById('registerTenantModal').classList.remove('hidden');
-        }
-        function closeRegisterTenantModal() {
-            document.getElementById('registerTenantModal').classList.add('hidden');
-        }
-        async function submitTenantRegistration() {
-            const id = document.getElementById('regTenantId').value;
-            const name = document.getElementById('regTenantName').value;
-
-            if (!id || !name) {
-                alert('Both ID and Name are required.');
-                return;
-            }
-
-            try {
-                const res = await fetch('/api/tenants', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id, name: name })
-                });
-                const r = await res.json();
-                if (res.ok) {
-                    alert(r.message);
-                    closeRegisterTenantModal();
-                    initAuth();
-                } else {
-                    alert('Error: ' + r.error);
-                }
-            } catch (err) {
-                console.error(err);
-            }
-        }
-
-        function openRegisterUserModal() {
-            const sel = document.getElementById('regUserTenantSelect');
-            sel.innerHTML = '';
-            Object.values(currentState.tenants || {}).forEach(t => {
-                const opt = document.createElement('option');
-                opt.value = t.id;
-                opt.text = t.name;
-                sel.appendChild(opt);
-            });
-
-            document.getElementById('registerUserModal').classList.remove('hidden');
-        }
-        function closeRegisterUserModal() {
-            document.getElementById('registerUserModal').classList.add('hidden');
-        }
-        async function submitUserRegistration() {
-            const id = document.getElementById('regUserId').value;
-            const name = document.getElementById('regUserName').value;
-            const tenantId = document.getElementById('regUserTenantSelect').value;
-            const role = document.getElementById('regUserRoleSelect').value;
-            const region = document.getElementById('regUserRegion').value;
-
-            if (!id || !name || !tenantId || !role || !region) {
-                alert('All user registration fields are required.');
-                return;
-            }
-
-            try {
-                const res = await fetch('/api/users', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, tenant_id: tenantId, name, role_name: role, region })
-                });
-                const r = await res.json();
-                if (res.ok) {
-                    alert(r.message);
-                    closeRegisterUserModal();
-                    initAuth();
-                } else {
-                    alert('Error: ' + r.error);
-                }
-            } catch (err) {
-                console.error(err);
-            }
-        }
-
         async function fetchState() {
             if (!loggedIn) return;
             try {
@@ -991,6 +1007,27 @@ const htmlContent = `
                 renderDashboard();
             } catch (err) {
                 console.error('Error loading state:', err);
+            }
+        }
+
+        async function downloadAuditExcel() {
+            try {
+                const res = await fetch('/api/exports/excel', { headers: currentHeaders });
+                if (!res.ok) {
+                    alert('Export failed — you may need to log in again.');
+                    return;
+                }
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'audit_log_' + currentUser.tenant_id + '.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            } catch (err) {
+                alert('Export failed: network error.');
             }
         }
 
@@ -1023,7 +1060,7 @@ const htmlContent = `
         }
 
         async function togglePermission(roleName, perm, checkbox) {
-            const currentRole = currentHeaders['Authorization-Roles'];
+            const currentRole = currentUser.role_name;
             if (currentRole !== 'tenant_admin') {
                 alert('Permission Denied: Only a TenantAdmin is authorized to update RBAC policies.');
                 checkbox.checked = !checkbox.checked;
@@ -1056,8 +1093,33 @@ const htmlContent = `
         }
 
         function renderDashboard() {
-            const activeRole = currentHeaders['Authorization-Roles'];
-            const activeTenant = currentHeaders['Authorization-Tenant-Id'];
+            const activeRole = currentUser.role_name;
+            const activeTenant = currentUser.tenant_id;
+
+            // Render Overdue Tasks (Task 4)
+            const overdueTasksSection = document.getElementById("overdueTasksSection");
+            const overdueTasksTableBody = document.getElementById("overdueTasksTableBody");
+            if (overdueTasksSection && overdueTasksTableBody) {
+                overdueTasksTableBody.innerHTML = "";
+                const oTasks = Object.values(currentState.overdue_tasks || {}).filter(t => t.tenant_id === activeTenant);
+                if (oTasks.length > 0) {
+                    overdueTasksSection.classList.remove("hidden");
+                    oTasks.forEach(task => {
+                        const tr = document.createElement("tr");
+                        tr.className = "border-b border-red-950 hover:bg-red-900/30 transition duration-150";
+                        const dStr = task.due_date ? new Date(task.due_date).toLocaleDateString() : "N/A";
+                        tr.innerHTML = "<td class='py-2.5 px-3 font-mono font-bold text-red-300'>" + task.id + "</td>" +
+                                       "<td class='py-2.5 px-3'>" + task.title + "</td>" +
+                                       "<td class='py-2.5 px-3 font-semibold'>" + (task.assigned_to || "Unassigned") + "</td>" +
+                                       "<td class='py-2.5 px-3'>" + task.region + "</td>" +
+                                       "<td class='py-2.5 px-3 font-mono text-red-400 font-bold'>" + dStr + "</td>" +
+                                       "<td class='py-2.5 px-3'><span class='bg-red-800 text-red-100 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase'>" + task.status + "</span></td>";
+                        overdueTasksTableBody.appendChild(tr);
+                    });
+                } else {
+                    overdueTasksSection.classList.add("hidden");
+                }
+            }
 
             // 1. Compile side navigation dynamically matching roles / clearance permissions
             const sidebarNav = document.getElementById('sidebarNav');
@@ -1496,7 +1558,7 @@ const htmlContent = `
             document.getElementById('modalItemId').value = itemId;
             const techSelect = document.getElementById('modalTechId');
             techSelect.innerHTML = '';
-            const currentTenant = currentHeaders['Authorization-Tenant-Id'];
+            const currentTenant = currentUser.tenant_id;
 
             Object.values(currentState.users || {}).forEach(u => {
                 if (u.tenant_id === currentTenant && u.role_name === 'field_technician') {
@@ -1542,7 +1604,7 @@ const htmlContent = `
             let deviceId = "item_onu_1";
             let invoiceId = "inv_safari_1";
 
-            const techObj = Object.values(currentState.users || {}).find(u => u.tenant_id === currentHeaders['Authorization-Tenant-Id'] && u.role_name === 'field_technician');
+            const techObj = Object.values(currentState.users || {}).find(u => u.tenant_id === currentUser.tenant_id && u.role_name === 'field_technician');
 
             // Assign a device serial number to customer, capture signature, and set status to dispatched
             alert("Customer signature captured: 'I accept drop-cable installation and router ONT serial configuration HW-GPON-9901.'");

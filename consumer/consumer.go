@@ -72,7 +72,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			}
 
 			// ABAC: Check write permission
-			if !database.CheckPermission(userRoles, "inventory:write") && !database.CheckPermission(userRoles, "*") {
+			if !database.CheckPermission(tenantID, userRoles, "inventory:write") && !database.CheckPermission(tenantID, userRoles, "*") {
 				log.Printf("INVENTORY ABAC: User %s lacks create permission", userID)
 				msg.Term()
 				return
@@ -267,7 +267,7 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 				return
 			}
 
-			if !database.IsSubordinate(approver.RoleName, subordinate.RoleName) {
+			if !database.IsSubordinate(tenantID, approver.RoleName, subordinate.RoleName) {
 				log.Printf("SECURITY VIOLATION: Role %s attempted to approve timesheet of peer/superior role %s without authority",
 					approver.RoleName, subordinate.RoleName)
 				sdb.Log(tenantID, userID, "SecurityViolation_Hierarchy", fmt.Sprintf("User tried to approve timesheet %s without authority", cmd.TimesheetID))
