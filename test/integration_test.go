@@ -226,7 +226,7 @@ func TestTaskDependencyEnforcement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = consumer.StartERPProcessors(ctx, nc, database, sdb)
+	err = consumer.StartERPProcessors(ctx, nc, database, sdb, nil)
 	assert.NoError(t, err)
 
 	// Create Task A (Pending)
@@ -341,4 +341,62 @@ func TestRegionalTimesheetApproval(t *testing.T) {
 	err = handlerFunc(c)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestInvitationAndHierarchy(t *testing.T) {
+	database := cleanAndSeedDB(t)
+	defer database.Pool.Close()
+
+	// 1. Create invitation
+	inv := &types.Invitation{
+		ID:        "inv_test_jordan",
+		TenantID:  "tenant_safari",
+		Email:     "jordan@safari.test",
+		Name:      "Jordan Smith",
+		RoleName:  "field_technician",
+		Region:    "Nairobi",
+		ManagerID: "usr_safari_mgr",
+		Token:     "test-token-xyz-123",
+		Status:    "Pending",
+		CreatedAt: time.Now(),
+	}
+
+	err := database.CreateInvitation(inv)
+	assert.NoError(t, err)
+
+	// 2. Retrieve invitation by token
+	retrieved, err := database.GetInvitationByToken("test-token-xyz-123")
+	assert.NoError(t, err)
+	assert.NotNil(t, retrieved)
+	assert.Equal(t, "Jordan Smith", retrieved.Name)
+	assert.Equal(t, "field_technician", retrieved.RoleName)
+	assert.Equal(t, "usr_safari_mgr", retrieved.ManagerID)
+
+	// 3. Accept invitation
+	user, err := database.AcceptInvitation("test-token-xyz-123", "hashedpassword123")
+	assert.NoError(t, err)
+	assert.NotNil(t, user)
+	assert.Equal(t, "Jordan Smith", user.Name)
+	assert.Equal(t, "jordan@safari.test", user.Email)
+	assert.Equal(t, "usr_safari_mgr", user.ManagerID)
+
+	// Verify user is in db
+	dbUser, err := database.GetUser(user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, "Jordan Smith", dbUser.Name)
+	assert.Equal(t, "usr_safari_mgr", dbUser.ManagerID)
+
+	// 4. Update manager
+	err = database.UpdateUserManager(user.ID, "usr_safari_admin")
+	assert.NoError(t, err)
+
+	dbUser, _ = database.GetUser(user.ID)
+	assert.Equal(t, "usr_safari_admin", dbUser.ManagerID)
+
+	// 5. Update role
+	err = database.UpdateUserRole(user.ID, "manager")
+	assert.NoError(t, err)
+
+	dbUser, _ = database.GetUser(user.ID)
+	assert.Equal(t, "manager", dbUser.RoleName)
 }

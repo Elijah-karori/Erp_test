@@ -101,8 +101,8 @@ func (d *Database) GetUser(userID string) (*types.User, error) {
 	ctx := context.Background()
 	var u types.User
 	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, email, role_name, region, password_hash FROM users WHERE id = $1", userID)
-		return row.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash)
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, email, role_name, region, password_hash, COALESCE(manager_id, '') FROM users WHERE id = $1", userID)
+		return row.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash, &u.ManagerID)
 	})
 	if err != nil {
 		return nil, err
@@ -114,8 +114,8 @@ func (d *Database) GetUserByEmail(email string) (*types.User, error) {
 	ctx := context.Background()
 	var u types.User
 	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, email, role_name, region, password_hash FROM users WHERE LOWER(email) = LOWER($1)", strings.TrimSpace(email))
-		return row.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash)
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, name, email, role_name, region, password_hash, COALESCE(manager_id, '') FROM users WHERE LOWER(email) = LOWER($1)", strings.TrimSpace(email))
+		return row.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash, &u.ManagerID)
 	})
 	if err != nil {
 		return nil, err
@@ -401,8 +401,8 @@ func (d *Database) CreateUser(id, tenantID, name, email, roleName, region, passw
 		}
 
 		_, err := tx.Exec(ctx, `
-			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash, manager_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)`,
 			id, tenantID, name, strings.ToLower(strings.TrimSpace(email)), roleName, region, passwordHash)
 		return err
 	})
@@ -457,8 +457,8 @@ func (d *Database) RegisterUserTransaction(id, tenantID, tenantName, name, email
 		user.RoleName = roleName
 
 		_, err := tx.Exec(ctx, `
-			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash, manager_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)`,
 			user.ID, user.TenantID, user.Name, user.Email, user.RoleName, user.Region, user.PasswordHash)
 		return err
 	})
@@ -756,6 +756,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		materialRequests  = make(map[string]*types.MaterialRequest)
 		procurementOrders = make(map[string]*types.ProcurementOrder)
 		overdueTasks      = make(map[string]*types.Task)
+		invitations       = make(map[string]*types.Invitation)
 	)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -781,16 +782,35 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 
 	g.Go(func() error {
 		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
-			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, name, email, role_name, region, password_hash FROM users WHERE tenant_id = $1", tenantID)
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, name, email, role_name, region, password_hash, COALESCE(manager_id, '') FROM users WHERE tenant_id = $1", tenantID)
 			if err != nil {
 				return err
 			}
 			defer rows.Close()
 			for rows.Next() {
 				var u types.User
-				if err := rows.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash); err == nil {
+				if err := rows.Scan(&u.ID, &u.TenantID, &u.Name, &u.Email, &u.RoleName, &u.Region, &u.PasswordHash, &u.ManagerID); err == nil {
 					mu.Lock()
 					users[u.ID] = &u
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, email, name, role_name, region, COALESCE(manager_id, ''), token, status, created_at FROM invitations WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var inv types.Invitation
+				if err := rows.Scan(&inv.ID, &inv.TenantID, &inv.Email, &inv.Name, &inv.RoleName, &inv.Region, &inv.ManagerID, &inv.Token, &inv.Status, &inv.CreatedAt); err == nil {
+					mu.Lock()
+					invitations[inv.ID] = &inv
 					mu.Unlock()
 				}
 			}
@@ -1009,6 +1029,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		"material_requests":  materialRequests,
 		"procurement_orders": procurementOrders,
 		"overdue_tasks":      overdueTasks,
+		"invitations":        invitations,
 	}
 }
 
@@ -1176,4 +1197,91 @@ func (d *Database) SeedIfNeeded() {
 	if err != nil {
 		log.Fatalf("failed to seed timesheets for tenant_safari: %v", err)
 	}
+}
+
+func (d *Database) CreateInvitation(inv *types.Invitation) error {
+	ctx := context.Background()
+	return d.withTx(ctx, inv.TenantID, func(tx pgx.Tx) error {
+		var emailExists bool
+		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(email) = LOWER($1))", strings.TrimSpace(inv.Email)).Scan(&emailExists)
+		if emailExists {
+			return errors.New("email already registered")
+		}
+
+		_, err := tx.Exec(ctx, `
+			INSERT INTO invitations (id, tenant_id, email, name, role_name, region, manager_id, token, status, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10)`,
+			inv.ID, inv.TenantID, strings.ToLower(strings.TrimSpace(inv.Email)), inv.Name, inv.RoleName, inv.Region, inv.ManagerID, inv.Token, inv.Status, inv.CreatedAt)
+		return err
+	})
+}
+
+func (d *Database) GetInvitationByToken(token string) (*types.Invitation, error) {
+	ctx := context.Background()
+	var inv types.Invitation
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, email, name, role_name, region, COALESCE(manager_id, ''), token, status, created_at FROM invitations WHERE token = $1", token)
+		return row.Scan(&inv.ID, &inv.TenantID, &inv.Email, &inv.Name, &inv.RoleName, &inv.Region, &inv.ManagerID, &inv.Token, &inv.Status, &inv.CreatedAt)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+func (d *Database) AcceptInvitation(token string, passwordHash string) (*types.User, error) {
+	ctx := context.Background()
+	var user types.User
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		var inv types.Invitation
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, email, name, role_name, region, COALESCE(manager_id, ''), token, status FROM invitations WHERE token = $1", token)
+		err := row.Scan(&inv.ID, &inv.TenantID, &inv.Email, &inv.Name, &inv.RoleName, &inv.Region, &inv.ManagerID, &inv.Token, &inv.Status)
+		if err != nil {
+			return err
+		}
+		if inv.Status != "Pending" {
+			return errors.New("invitation is not pending")
+		}
+
+		// Update invitation status
+		_, err = tx.Exec(ctx, "UPDATE invitations SET status = 'Accepted' WHERE id = $1", inv.ID)
+		if err != nil {
+			return err
+		}
+
+		user.ID = "usr_" + uuid.NewString()[:12]
+		user.TenantID = inv.TenantID
+		user.Name = inv.Name
+		user.Email = inv.Email
+		user.RoleName = inv.RoleName
+		user.Region = inv.Region
+		user.PasswordHash = passwordHash
+		user.ManagerID = inv.ManagerID
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO users (id, tenant_id, name, email, role_name, region, password_hash, manager_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''))`,
+			user.ID, user.TenantID, user.Name, user.Email, user.RoleName, user.Region, user.PasswordHash, user.ManagerID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (d *Database) UpdateUserManager(userID, managerID string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, "", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE users SET manager_id = NULLIF($1, '') WHERE id = $2", managerID, userID)
+		return err
+	})
+}
+
+func (d *Database) UpdateUserRole(userID, roleName string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, "", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE users SET role_name = $1 WHERE id = $2", roleName, userID)
+		return err
+	})
 }

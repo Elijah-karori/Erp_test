@@ -1,0 +1,46 @@
+WARNING: ERP_JWT_SECRET not set — using an insecure development default. Set ERP_JWT_SECRET before deploying anywhere reachable outside localhost.
+
+   ____    __
+  / __/___/ /  ___
+ / _// __/ _ \/ _ \
+/___/\__/_//_/\___/ v4.15.4
+High performance, minimalist Go web framework
+https://echo.labstack.com
+____________________________________O/_______
+                                    O\
+⇨ http server started on [::]:8080
+{"time":"2026-08-04T19:34:16.909530034Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":492359,"latency_human":"492.359µs","bytes_in":0,"bytes_out":113829}
+2026/08/04 19:34:18 [SMTP MOCK] Sending email to: alice@safari.test
+Subject: Security Alert: Successful Login to SME Kenya ERP
+Body: <h2>Successful Login Confirmation</h2>
+<p>Hello Alice Admin,</p>
+<p>Your workspace account has been successfully accessed.</p>
+<ul>
+  <li><strong>Time:</strong> Tue, 04 Aug 2026 19:34:18 UTC</li>
+  <li><strong>Region/Location:</strong> Nairobi</li>
+</ul>
+<p>If this was not you, please immediately notify your workspace administrator and reset your password.</p>
+<p>Best regards,<br>ERP System Security Team</p>
+{"time":"2026-08-04T19:34:18.878904991Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"POST","uri":"/api/login","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":96591583,"latency_human":"96.591583ms","bytes_in":55,"bytes_out":481}
+{"time":"2026-08-04T19:34:18.91794065Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/state","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":33092782,"latency_human":"33.092782ms","bytes_in":0,"bytes_out":3031}
+{"time":"2026-08-04T19:34:19.019148196Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/logs","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":2145449,"latency_human":"2.145449ms","bytes_in":0,"bytes_out":180}
+{"time":"2026-08-04T19:34:22.419995916Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/logs","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":2284257,"latency_human":"2.284257ms","bytes_in":0,"bytes_out":180}
+{"time":"2026-08-04T19:34:22.424977631Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/state","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":7300558,"latency_human":"7.300558ms","bytes_in":0,"bytes_out":3031}
+2026/08/04 19:34:23 [SMTP MOCK] Sending email to: jordan.smith@safari.test
+Subject: Invitation to join SME Kenya ERP Workspace
+Body: <h2>Workspace Invitation</h2>
+<p>Hello Jordan Smith,</p>
+<p>You have been invited to join an enterprise workspace on SME Kenya ERP Platform.</p>
+<p>Click the link below to activate your account and set up your password:</p>
+<p><a href="http://localhost:8080/activate.html?token=ce2d9956-bb94-4ea2-85db-450c91556812&tenant_id=tenant_safari&role_assignment_id=manager" style="display:inline-block;padding:10px 20px;background-color:#4F46E5;color:white;text-decoration:none;border-radius:6px;font-weight:bold;">Activate Workspace Account</a></p>
+<hr>
+<p><strong>Tenant ID:</strong> tenant_safari</p>
+<p><strong>Role Assignment ID:</strong> manager</p>
+<p>This invitation link is valid for 7 days.</p>
+<p>Best regards,<br>ERP System Team</p>
+{"time":"2026-08-04T19:34:23.904259121Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"POST","uri":"/api/users/invite","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":5254857,"latency_human":"5.254857ms","bytes_in":115,"bytes_out":238}
+{"time":"2026-08-04T19:34:23.914544357Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/state","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":5279799,"latency_human":"5.279799ms","bytes_in":0,"bytes_out":3311}
+{"time":"2026-08-04T19:34:27.41814851Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/logs","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":1357186,"latency_human":"1.357186ms","bytes_in":0,"bytes_out":395}
+{"time":"2026-08-04T19:34:27.42322684Z","id":"","remote_ip":"::1","host":"localhost:8080","method":"GET","uri":"/api/state","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36","status":200,"error":"","latency":6528369,"latency_human":"6.528369ms","bytes_in":0,"bytes_out":3311}
+2026/08/04 19:35:26 Gracefully shutting down Echo Server and background consumers...
+2026/08/04 19:35:26 Echo server shut down: http: Server closed
