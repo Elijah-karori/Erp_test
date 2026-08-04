@@ -116,11 +116,14 @@ func main() {
 	// Inventory Endpoints: (Hierarchy Checks via middleware permission levels)
 	api.POST("/inventory", h.CreateInventoryItemHandler, middleware.ModuleClearanceMiddleware(database, "inventory:write"))
 	api.POST("/inventory/assign", h.AssignDeviceHandler, middleware.ModuleClearanceMiddleware(database, "inventory:*"))
+	api.POST("/inventory/threshold", h.UpdateInventoryThresholdHandler, middleware.ModuleClearanceMiddleware(database, "inventory:*"))
 
 	// Finance Endpoints:
 	api.POST("/finance/payments", h.RecordPaymentHandler, middleware.ModuleClearanceMiddleware(database, "finance:write"))
 
 	// Tasks Endpoints:
+	api.POST("/tasks", h.CreateTaskHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.POST("/tasks/status", h.UpdateTaskStatusHandler, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
 	api.POST("/tasks/timesheets/approve", h.ApproveTimesheetHandler, middleware.ModuleClearanceMiddleware(database, "timesheets:approve"))
 	api.POST("/tasks/materials/request", h.SubmitMaterialRequestHandler, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
 	api.POST("/tasks/materials/approve", h.ApproveMaterialHandler, middleware.ModuleClearanceMiddleware(database, "tasks:approve"))

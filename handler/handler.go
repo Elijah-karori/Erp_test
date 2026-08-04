@@ -50,16 +50,21 @@ func (h *ERPHandler) CreateInventoryItemHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Name and SerialNumber are required"})
 	}
 
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	exists, err := h.db.CheckSerialNumberExists(tenantID, cmd.SerialNumber)
+	if err == nil && exists {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "serial number already registered"})
+	}
+
 	msg := h.newContextMsg("erp.inventory.item.cmd.create", c)
 	payload, _ := json.Marshal(cmd)
 	msg.Data = payload
 
-	_, err := h.js.PublishMsg(msg)
+	_, err = h.js.PublishMsg(msg)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish item create command"})
 	}
 
-	tenantID := c.Get(middleware.ContextTenantID).(string)
 	userID := c.Get(middleware.ContextUserID).(string)
 	h.sqliteDB.Log(tenantID, userID, "CreateItem_Request", fmt.Sprintf("Queued creation of %s (SN: %s)", cmd.Name, cmd.SerialNumber))
 
@@ -131,16 +136,34 @@ func (h *ERPHandler) ApproveTimesheetHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "TimesheetID is required"})
 	}
 
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	region, _ := c.Get(middleware.ContextRegion).(string)
+
+	ts, err := h.db.GetTimesheet(cmd.TimesheetID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "timesheet not found"})
+	}
+	if ts.TenantID != tenantID {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized: tenant mismatch"})
+	}
+
+	task, err := h.db.GetTask(ts.TaskID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "associated task not found"})
+	}
+	if task.Region != region {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized: task region mismatch"})
+	}
+
 	msg := h.newContextMsg("erp.tasks.timesheet.cmd.approve", c)
 	payload, _ := json.Marshal(cmd)
 	msg.Data = payload
 
-	_, err := h.js.PublishMsg(msg)
+	_, err = h.js.PublishMsg(msg)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish timesheet approval command"})
 	}
 
-	tenantID := c.Get(middleware.ContextTenantID).(string)
 	userID := c.Get(middleware.ContextUserID).(string)
 	h.sqliteDB.Log(tenantID, userID, "ApproveTimesheet_Request", fmt.Sprintf("Queued approval of timesheet %s", cmd.TimesheetID))
 
@@ -262,4 +285,89 @@ func (h *ERPHandler) CreateCustomerHandler(c echo.Context) error {
 	h.sqliteDB.Log(tenantID, userID, "CreateCustomer_Request", fmt.Sprintf("Queued registration of customer %s (%s)", cmd.Name, cmd.Phone))
 
 	return c.JSON(http.StatusAccepted, map[string]string{"message": "Customer creation queued"})
+}
+
+// CreateTaskHandler publishes a command to create a task to the TASKS stream
+func (h *ERPHandler) CreateTaskHandler(c echo.Context) error {
+	var cmd types.CreateTaskCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.Title == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Title is required"})
+	}
+
+	if cmd.ID == "" {
+		cmd.ID = "task_" + uuid.New().String()[:8]
+	}
+
+	msg := h.newContextMsg("erp.tasks.task.cmd.create", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish task creation command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "CreateTask_Request", fmt.Sprintf("Queued creation of task '%s' (ID: %s)", cmd.Title, cmd.ID))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Task creation queued"})
+}
+
+// UpdateTaskStatusHandler publishes a status update command to the TASKS stream
+func (h *ERPHandler) UpdateTaskStatusHandler(c echo.Context) error {
+	var cmd types.UpdateTaskStatusCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.TaskID == "" || cmd.Status == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "TaskID and Status are required"})
+	}
+
+	msg := h.newContextMsg("erp.tasks.task.cmd.update_status", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish status update command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "UpdateTaskStatus_Request", fmt.Sprintf("Queued status update of task %s to %s", cmd.TaskID, cmd.Status))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Status update queued"})
+}
+
+// UpdateInventoryThresholdHandler publishes a reorder threshold update to the INVENTORY stream
+func (h *ERPHandler) UpdateInventoryThresholdHandler(c echo.Context) error {
+	var cmd types.UpdateInventoryThresholdCommand
+	if err := c.Bind(&cmd); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid body"})
+	}
+
+	if cmd.ItemID == "" || cmd.ReorderThreshold < 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ItemID and non-negative ReorderThreshold are required"})
+	}
+
+	msg := h.newContextMsg("erp.inventory.item.cmd.update_threshold", c)
+	payload, _ := json.Marshal(cmd)
+	msg.Data = payload
+
+	_, err := h.js.PublishMsg(msg)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to publish threshold update command"})
+	}
+
+	tenantID := c.Get(middleware.ContextTenantID).(string)
+	userID := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "UpdateThreshold_Request", fmt.Sprintf("Queued threshold update for %s to %d", cmd.ItemID, cmd.ReorderThreshold))
+
+	return c.JSON(http.StatusAccepted, map[string]string{"message": "Threshold update queued"})
 }

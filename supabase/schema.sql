@@ -192,16 +192,27 @@ create index idx_erp_logs_tenant on erp_logs(tenant_id, id desc);
 -- ROW LEVEL SECURITY — defense in depth behind the app-layer tenant filter
 -- ============================================================
 alter table roles enable row level security;
+alter table roles force row level security;
 alter table users enable row level security;
+alter table users force row level security;
 alter table customers enable row level security;
+alter table customers force row level security;
 alter table inventory_items enable row level security;
+alter table inventory_items force row level security;
 alter table material_requests enable row level security;
+alter table material_requests force row level security;
 alter table procurement_orders enable row level security;
+alter table procurement_orders force row level security;
 alter table invoices enable row level security;
+alter table invoices force row level security;
 alter table payments enable row level security;
+alter table payments force row level security;
 alter table tasks enable row level security;
+alter table tasks force row level security;
 alter table timesheets enable row level security;
+alter table timesheets force row level security;
 alter table erp_logs enable row level security;
+alter table erp_logs force row level security;
 
 -- One policy per table, all following the same shape: only rows whose
 -- tenant_id matches the session variable the Go app sets per request.
@@ -220,9 +231,48 @@ create policy tenant_isolation on erp_logs          using (tenant_id = current_s
 -- The app connects with a single Postgres role (not per-tenant DB roles),
 -- so grant that role bypass-free access and let RLS above do the filtering.
 -- Replace `erp_app` with whatever role your Go service's DSN authenticates as.
--- create role erp_app login password '...';
+--
+-- WHY BYPASSRLS, NOT SUPERUSER (read this before changing it):
+-- A handful of queries in db.go legitimately can't scope by tenant up front
+-- — GetUserByEmail (login happens before we know which tenant a user is
+-- in), the platform-wide email-uniqueness check in RegisterUserTransaction,
+-- and a few "look up by opaque ID, then verify tenant" reads. Under RLS
+-- with no session variable set, current_setting('app.current_tenant_id')
+-- is NULL and `tenant_id = NULL` is never true — so these queries would
+-- return zero rows unconditionally, which breaks login outright, not just
+-- leaks data. That's a correctness bug, not a security feature.
+--
+-- The fix is BYPASSRLS specifically, not SUPERUSER (which the CI workflow
+-- used to grant, and which is much more than this role needs — it also
+-- allows creating/dropping roles and databases). BYPASSRLS only skips RLS
+-- policy evaluation; every other Postgres privilege still applies normally,
+-- and still only within whatever GRANTs you give it below.
+--
+-- This is safe here specifically because tenant isolation for every
+-- write path is already enforced explicitly in Go, not left to RLS alone:
+-- GetStateForTenant filters every SELECT with tenant_id = $1, and
+-- consumer/consumer.go independently re-verifies the caller's tenant
+-- before every mutation (search that file for CrossTenantInventoryAccess,
+-- CrossTenantFinanceAccess, CrossTenantAttack) and raises a security alert
+-- if it doesn't match. RLS remains enabled on every table below as a
+-- second layer against a *different*, less-trusted credential ever
+-- querying this database directly (e.g. the Supabase SQL editor logged in
+-- as a lower-privileged role, or a future read-only reporting connection)
+-- — it's just not the layer the app itself depends on to function.
+--
+-- One more subtlety worth being explicit about: every table below also has
+-- FORCE ROW LEVEL SECURITY set (not just ENABLE). Without FORCE, Postgres
+-- exempts the table's OWNER from RLS by default — and since the CI/setup
+-- flow below has erp_app create the schema itself (so it owns every table
+-- it creates), RLS would silently do nothing even without BYPASSRLS, for
+-- reasons that have nothing to do with the BYPASSRLS grant at all. FORCE
+-- makes the exemption explicit and intentional (via BYPASSRLS) rather than
+-- an accident of who happened to run the migration.
+--
+-- create role erp_app with login password '...' bypassrls;
 -- grant usage on schema public to erp_app;
 -- grant select, insert, update, delete on all tables in schema public to erp_app;
+-- grant usage, select on all sequences in schema public to erp_app;
 
 -- ============================================================
 -- INVENTORY HISTORY (Task 3)
@@ -238,4 +288,5 @@ create table inventory_history (
 );
 create index idx_inventory_history_tenant on inventory_history(tenant_id);
 alter table inventory_history enable row level security;
+alter table inventory_history force row level security;
 create policy tenant_isolation on inventory_history using (tenant_id = current_setting('app.current_tenant_id', true));

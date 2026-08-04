@@ -377,6 +377,25 @@ const htmlContent = `
 
                 <!-- Module B: Inventory View -->
                 <div id="view_inventory" class="hidden space-y-6">
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4">
+                            <span class="text-xs text-slate-400 uppercase tracking-widest font-bold">Total Items</span>
+                            <div class="text-3xl font-bold text-white mt-2" id="statInvTotal">0</div>
+                        </div>
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4">
+                            <span class="text-xs text-slate-400 uppercase tracking-widest font-bold">In Stock</span>
+                            <div class="text-3xl font-bold text-emerald-400 mt-2" id="statInvStock">0</div>
+                        </div>
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4">
+                            <span class="text-xs text-slate-400 uppercase tracking-widest font-bold">Assigned</span>
+                            <div class="text-3xl font-bold text-sky-400 mt-2" id="statInvAssigned">0</div>
+                        </div>
+                        <div class="bg-brand-500 rounded-xl border border-rose-600 p-4">
+                            <span class="text-xs text-rose-400 uppercase tracking-widest font-bold flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i> Low Stock Alerts</span>
+                            <div class="text-3xl font-bold text-rose-400 mt-2" id="statInvLowStock">0</div>
+                        </div>
+                    </div>
+
                     <div id="inventorySection" class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-bold text-lg flex items-center space-x-2">
@@ -386,7 +405,7 @@ const htmlContent = `
                             <span id="inventoryHeaderBadge" class="text-xs text-slate-400 uppercase tracking-widest">STRICT SERIAL CONTROL</span>
                         </div>
 
-                        <form id="createItemForm" onsubmit="createInventoryItem(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-brand-900 rounded-lg border border-brand-600">
+                        <form id="createItemForm" onsubmit="createInventoryItem(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-brand-900 rounded-lg border border-brand-600">
                             <div>
                                 <label class="block text-xs text-slate-400 font-bold mb-1">Item Name</label>
                                 <input type="text" id="itemName" placeholder="Huawei GPON ONU" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
@@ -395,6 +414,10 @@ const htmlContent = `
                                 <label class="block text-xs text-slate-400 font-bold mb-1">Serial Number</label>
                                 <input type="text" id="itemSerial" placeholder="SN-HUA-7700" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
                             </div>
+                            <div>
+                                <label class="block text-xs text-slate-400 font-bold mb-1" title="Auto-queues a procurement order when in-stock count for this item name drops to or below this number">Reorder Threshold</label>
+                                <input type="number" id="itemReorderThreshold" min="0" value="0" placeholder="5" class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
+                            </div>
                             <div class="flex items-end">
                                 <button id="createItemBtn" type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2 px-4 rounded transition duration-200">
                                     Create Serial Asset
@@ -402,15 +425,24 @@ const htmlContent = `
                             </div>
                         </form>
 
+                        <div class="flex items-center gap-4 mb-4 text-xs font-bold">
+                            <button onclick="setInventoryFilter('all')" id="invFilter_all" class="text-emerald-400 border-b-2 border-emerald-400 pb-1">All Items</button>
+                            <button onclick="setInventoryFilter('In_Stock')" id="invFilter_In_Stock" class="text-slate-400 hover:text-slate-200 pb-1">In Stock</button>
+                            <button onclick="setInventoryFilter('Assigned')" id="invFilter_Assigned" class="text-slate-400 hover:text-slate-200 pb-1">Assigned</button>
+                            <button onclick="setInventoryFilter('low_stock')" id="invFilter_low_stock" class="text-slate-400 hover:text-slate-200 pb-1">Low Stock</button>
+                        </div>
+
                         <div class="overflow-x-auto w-full max-w-full block">
-                            <table class="w-full text-left text-sm min-w-[600px]">
+                            <table class="w-full text-left text-sm min-w-[700px]">
                                 <thead>
                                     <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
                                         <th class="py-3 px-4">Item ID</th>
                                         <th class="py-3 px-4">Name</th>
                                         <th class="py-3 px-4">Serial #</th>
                                         <th class="py-3 px-4">Status</th>
+                                        <th class="py-3 px-4">Region</th>
                                         <th class="py-3 px-4">Allocation</th>
+                                        <th class="py-3 px-4">Reorder At</th>
                                         <th class="py-3 px-4">Action</th>
                                     </tr>
                                 </thead>
@@ -758,6 +790,7 @@ const htmlContent = `
         let currentUser = {};
         let authToken = '';
         let activeView = 'dashboard';
+        let inventoryFilter = 'all';
         let loggedIn = false;
         let recentNotifications = [];
         let mobileSidebarOpen = false;
@@ -924,6 +957,18 @@ const htmlContent = `
             if (mobileSidebarOpen) {
                 toggleMobileSidebar();
             }
+        }
+
+        function setInventoryFilter(filter) {
+            inventoryFilter = filter;
+            ['all', 'In_Stock', 'Assigned', 'low_stock'].forEach(f => {
+                const btn = document.getElementById('invFilter_' + f);
+                if (!btn) return;
+                btn.className = f === filter
+                    ? 'text-emerald-400 border-b-2 border-emerald-400 pb-1'
+                    : 'text-slate-400 hover:text-slate-200 pb-1';
+            });
+            renderDashboard();
         }
 
         function switchModuleView(viewName) {
@@ -1138,7 +1183,10 @@ const htmlContent = `
             ];
 
             navItems.forEach(n => {
-                const isCleared = !n.perm || activeRolePermissions.includes(n.perm) || activeRolePermissions.includes('*');
+                const isCleared = !n.perm ||
+                    activeRolePermissions.includes(n.perm) ||
+                    activeRolePermissions.includes('*') ||
+                    activeRolePermissions.some(p => p.endsWith(':*') && n.perm && n.perm.startsWith(p.slice(0, -2)));
                 if (!isCleared) return;
 
                 const btn = document.createElement('button');
@@ -1201,7 +1249,7 @@ const htmlContent = `
                 });
             }
 
-            // Render Inventory Control tables
+            // Render Inventory Control: stat cards + filtered table
             const invBody = document.getElementById('inventoryTableBody');
             if (invBody) {
                 invBody.innerHTML = '';
@@ -1209,24 +1257,48 @@ const htmlContent = `
                 const canWriteInventory = activeRolePermissions.includes('inventory:write') || activeRolePermissions.includes('inventory:*') || activeRolePermissions.includes('*');
 
                 if (canViewInventory) {
-                    Object.values(currentState.inventory || {}).forEach(item => {
-                        if (item.tenant_id !== activeTenant) return;
+                    const tenantItems = Object.values(currentState.inventory || {}).filter(item => item.tenant_id === activeTenant);
 
+                    // Low stock = for this item's name, in-stock count <= that name's max reorder threshold.
+                    // Mirrors db.CheckReorderThresholdAndTriggerProcurement's own definition server-side.
+                    const stockByName = {};
+                    const thresholdByName = {};
+                    tenantItems.forEach(it => {
+                        if (it.status === 'In_Stock') stockByName[it.name] = (stockByName[it.name] || 0) + 1;
+                        thresholdByName[it.name] = Math.max(thresholdByName[it.name] || 0, it.reorder_threshold || 0);
+                    });
+                    const lowStockNames = new Set(Object.keys(thresholdByName).filter(name => (stockByName[name] || 0) <= thresholdByName[name]));
+
+                    document.getElementById('statInvTotal').innerText = tenantItems.length;
+                    document.getElementById('statInvStock').innerText = tenantItems.filter(i => i.status === 'In_Stock').length;
+                    document.getElementById('statInvAssigned').innerText = tenantItems.filter(i => i.status !== 'In_Stock').length;
+                    document.getElementById('statInvLowStock').innerText = lowStockNames.size;
+
+                    const filtered = tenantItems.filter(item => {
+                        if (inventoryFilter === 'all') return true;
+                        if (inventoryFilter === 'low_stock') return lowStockNames.has(item.name);
+                        return item.status === inventoryFilter;
+                    });
+
+                    filtered.forEach(item => {
                         const tr = document.createElement('tr');
                         tr.className = 'hover:bg-brand-600 transition';
 
                         const statusColor = item.status === 'In_Stock' ? 'text-emerald-400 font-semibold' : 'text-sky-400';
                         const allocText = item.assigned_to ? item.assigned_to : '<span class=\'text-slate-500\'>Unassigned</span>';
+                        const lowBadge = lowStockNames.has(item.name) ? ' <i class="fa-solid fa-triangle-exclamation text-rose-400" title="Low stock"></i>' : '';
 
                         const assignBtn = item.status === 'In_Stock'
                             ? '<button onclick="openAllocationModal(\'' + item.id + '\')" ' + (canWriteInventory ? '' : 'disabled') + ' class="text-xs bg-brand-900 text-emerald-400 hover:bg-brand-500 border border-brand-600 rounded py-1 px-2 font-bold transition disabled:opacity-40">Allocate</button>'
                             : '<span class="text-xs text-slate-500">Allocated</span>';
 
                         tr.innerHTML = '<td class="py-3 px-4 font-mono">' + item.id + '</td>' +
-                            '<td class="py-3 px-4">' + item.name + '</td>' +
+                            '<td class="py-3 px-4">' + item.name + lowBadge + '</td>' +
                             '<td class="py-3 px-4 font-mono">' + item.serial_number + '</td>' +
                             '<td class="py-3 px-4 ' + statusColor + '">' + item.status + '</td>' +
+                            '<td class="py-3 px-4 text-slate-300">' + item.region + '</td>' +
                             '<td class="py-3 px-4 text-emerald-300 font-medium">' + allocText + '</td>' +
+                            '<td class="py-3 px-4 text-slate-400">' + (item.reorder_threshold || 0) + '</td>' +
                             '<td class="py-3 px-4">' + assignBtn + '</td>';
                         invBody.appendChild(tr);
                     });
@@ -1374,18 +1446,20 @@ const htmlContent = `
             e.preventDefault();
             const name = document.getElementById('itemName').value;
             const sn = document.getElementById('itemSerial').value;
+            const reorderThreshold = parseInt(document.getElementById('itemReorderThreshold').value, 10) || 0;
 
             try {
                 const res = await fetch('/api/inventory', {
                     method: 'POST',
                     headers: currentHeaders,
-                    body: JSON.stringify({ name, serial_number: sn })
+                    body: JSON.stringify({ name, serial_number: sn, reorder_threshold: reorderThreshold })
                 });
                 const r = await res.json();
                 if (res.ok) {
                     pushNotification('INVENTORY_QUEUED', 'Creation command published to SALES stream.');
                     document.getElementById('itemName').value = '';
                     document.getElementById('itemSerial').value = '';
+                    document.getElementById('itemReorderThreshold').value = '0';
                     setTimeout(fetchState, 1500);
                 } else {
                     alert('Error: ' + (r.error || r.message));
