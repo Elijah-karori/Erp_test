@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -17,6 +18,9 @@ import (
 	"erp-event-bus/auth"
 	"erp-event-bus/types"
 )
+
+//go:embed schema.sql
+var SchemaSQL string
 
 type Database struct {
 	Pool *pgxpool.Pool
@@ -1012,7 +1016,14 @@ func (d *Database) SeedIfNeeded() {
 	ctx := context.Background()
 	var count int
 	err := d.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM tenants").Scan(&count)
-	if err == nil && count > 0 {
+	if err != nil {
+		log.Println("Database schema is missing or tenants table does not exist. Initializing database schema...")
+		_, execErr := d.Pool.Exec(ctx, SchemaSQL)
+		if execErr != nil {
+			log.Fatalf("failed to initialize database schema: %v", execErr)
+		}
+		log.Println("Database schema initialized successfully.")
+	} else if count > 0 {
 		return
 	}
 
