@@ -1032,46 +1032,74 @@ func (d *Database) SeedIfNeeded() {
 		{"tenant_admin", "manager", []string{"inventory:*", "finance:*", "tasks:*", "users:*"}},
 	}
 	for _, r := range safariRoles {
-		_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+		err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, "INSERT INTO roles (tenant_id, name, parent_role, permissions) VALUES ($1, $2, NULLIF($3, ''), $4) ON CONFLICT DO NOTHING",
 				"tenant_safari", r.Name, r.ParentRole, r.Permissions)
 			return err
 		})
+		if err != nil {
+			log.Fatalf("failed to seed roles for tenant_safari: %v", err)
+		}
 	}
 
 	for _, r := range safariRoles {
-		_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+		err = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, "INSERT INTO roles (tenant_id, name, parent_role, permissions) VALUES ($1, $2, NULLIF($3, ''), $4) ON CONFLICT DO NOTHING",
 				"tenant_pioneer", r.Name, r.ParentRole, r.Permissions)
 			return err
 		})
+		if err != nil {
+			log.Fatalf("failed to seed roles for tenant_pioneer: %v", err)
+		}
 	}
 
 	seedHash := mustHashSeedPassword("ChangeMe123!")
 
-	_ = d.CreateUser("usr_safari_admin", "tenant_safari", "Alice Admin", "alice@safari.test", "tenant_admin", "Nairobi", seedHash)
-	_ = d.CreateUser("usr_safari_mgr", "tenant_safari", "Bob Manager", "bob@safari.test", "manager", "Nairobi", seedHash)
-	_ = d.CreateUser("usr_safari_tech", "tenant_safari", "Charlie Tech", "charlie@safari.test", "field_technician", "Mombasa", seedHash)
+	if err = d.CreateUser("usr_safari_admin", "tenant_safari", "Alice Admin", "alice@safari.test", "tenant_admin", "Nairobi", seedHash); err != nil {
+		log.Fatalf("failed to seed user usr_safari_admin: %v", err)
+	}
+	if err = d.CreateUser("usr_safari_mgr", "tenant_safari", "Bob Manager", "bob@safari.test", "manager", "Nairobi", seedHash); err != nil {
+		log.Fatalf("failed to seed user usr_safari_mgr: %v", err)
+	}
+	if err = d.CreateUser("usr_safari_tech", "tenant_safari", "Charlie Tech", "charlie@safari.test", "field_technician", "Mombasa", seedHash); err != nil {
+		log.Fatalf("failed to seed user usr_safari_tech: %v", err)
+	}
 
-	_ = d.CreateUser("usr_pioneer_mgr", "tenant_pioneer", "Daniel Manager", "daniel@pioneer.test", "manager", "Kisumu", seedHash)
-	_ = d.CreateUser("usr_pioneer_fin", "tenant_pioneer", "Eva Finance", "eva@pioneer.test", "finance_officer", "Kisumu", seedHash)
-	_ = d.CreateUser("usr_pioneer_tech", "tenant_pioneer", "Frank Tech", "frank@pioneer.test", "field_technician", "Nairobi", seedHash)
+	if err = d.CreateUser("usr_pioneer_mgr", "tenant_pioneer", "Daniel Manager", "daniel@pioneer.test", "manager", "Kisumu", seedHash); err != nil {
+		log.Fatalf("failed to seed user usr_pioneer_mgr: %v", err)
+	}
+	if err = d.CreateUser("usr_pioneer_fin", "tenant_pioneer", "Eva Finance", "eva@pioneer.test", "finance_officer", "Kisumu", seedHash); err != nil {
+		log.Fatalf("failed to seed user usr_pioneer_fin: %v", err)
+	}
+	if err = d.CreateUser("usr_pioneer_tech", "tenant_pioneer", "Frank Tech", "frank@pioneer.test", "field_technician", "Nairobi", seedHash); err != nil {
+		log.Fatalf("failed to seed user usr_pioneer_tech: %v", err)
+	}
 
-	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+	err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO customers (id, tenant_id, name, phone, email, dispatch_status) VALUES ('cust_saf_77', 'tenant_safari', 'Safaricom client Nairobi', '254711223344', 'saf_client@gmail.com', 'Pending') ON CONFLICT DO NOTHING")
 		return err
 	})
-	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+	if err != nil {
+		log.Fatalf("failed to seed customers for tenant_safari: %v", err)
+	}
+
+	err = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO customers (id, tenant_id, name, phone, email, dispatch_status) VALUES ('cust_pio_88', 'tenant_pioneer', 'Pioneer Kisumu printer client', '254755667788', 'pioneer_client@gmail.com', 'Pending') ON CONFLICT DO NOTHING")
 		return err
 	})
+	if err != nil {
+		log.Fatalf("failed to seed customers for tenant_pioneer: %v", err)
+	}
 
-	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+	err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO material_requests (id, tenant_id, requester_id, item_name, status, created_at) VALUES ('req_safari_1', 'tenant_safari', 'usr_safari_tech', 'Huawei GPON ONU', 'Pending_Leader_Approval', NOW()) ON CONFLICT DO NOTHING")
 		return err
 	})
+	if err != nil {
+		log.Fatalf("failed to seed material requests for tenant_safari: %v", err)
+	}
 
-	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+	err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold) VALUES ('item_onu_1', 'tenant_safari', 'Huawei GPON ONU', 'SN-HUA-9901', 'In_Stock', NULL, 'Nairobi', 1) ON CONFLICT DO NOTHING")
 		if err != nil {
 			return err
@@ -1079,34 +1107,62 @@ func (d *Database) SeedIfNeeded() {
 		_, err = tx.Exec(ctx, "INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold) VALUES ('item_onu_2', 'tenant_safari', 'Huawei GPON ONU', 'SN-HUA-9902', 'Assigned', 'usr_safari_tech', 'Mombasa', 1) ON CONFLICT DO NOTHING")
 		return err
 	})
-	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+	if err != nil {
+		log.Fatalf("failed to seed inventory_items for tenant_safari: %v", err)
+	}
+
+	err = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold) VALUES ('item_printer_part', 'tenant_pioneer', 'LaserJet Fuser Assembly', 'SN-HP-3030', 'In_Stock', NULL, 'Kisumu', 1) ON CONFLICT DO NOTHING")
 		return err
 	})
+	if err != nil {
+		log.Fatalf("failed to seed inventory_items for tenant_pioneer: %v", err)
+	}
 
-	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+	err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO invoices (id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region) VALUES ('inv_safari_1', 'tenant_safari', 'cust_saf_77', 5000.0, 2000.0, 3000.0, 'Partially_Paid', 'Nairobi') ON CONFLICT DO NOTHING")
 		return err
 	})
-	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+	if err != nil {
+		log.Fatalf("failed to seed invoices for tenant_safari: %v", err)
+	}
+
+	err = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO invoices (id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region) VALUES ('inv_pioneer_1', 'tenant_pioneer', 'cust_pio_88', 15000.0, 0.0, 15000.0, 'Approved', 'Kisumu') ON CONFLICT DO NOTHING")
 		return err
 	})
+	if err != nil {
+		log.Fatalf("failed to seed invoices for tenant_pioneer: %v", err)
+	}
 
-	_ = d.UpdateCustomerDeviceTransaction("cust_saf_77", "item_onu_2", "inv_safari_1", "Pending")
-	_ = d.UpdateCustomerDeviceTransaction("cust_pio_88", "item_printer_part", "inv_pioneer_1", "Pending")
+	if err = d.UpdateCustomerDeviceTransaction("cust_saf_77", "item_onu_2", "inv_safari_1", "Pending"); err != nil {
+		log.Fatalf("failed to update customer device for tenant_safari: %v", err)
+	}
+	if err = d.UpdateCustomerDeviceTransaction("cust_pio_88", "item_printer_part", "inv_pioneer_1", "Pending"); err != nil {
+		log.Fatalf("failed to update customer device for tenant_pioneer: %v", err)
+	}
 
-	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+	err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO tasks (id, tenant_id, title, assigned_to, created_by, status, region, due_date) VALUES ('task_safari_install', 'tenant_safari', 'Fibre Home Installation', 'usr_safari_tech', 'usr_safari_mgr', 'In_Progress', 'Mombasa', CURRENT_DATE + 5) ON CONFLICT DO NOTHING")
 		return err
 	})
-	_ = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
+	if err != nil {
+		log.Fatalf("failed to seed tasks for tenant_safari: %v", err)
+	}
+
+	err = d.withTx(ctx, "tenant_pioneer", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO tasks (id, tenant_id, title, assigned_to, created_by, status, region, due_date) VALUES ('task_pioneer_repair', 'tenant_pioneer', 'Office Copier Repair', 'usr_pioneer_tech', 'usr_pioneer_mgr', 'Pending', 'Nairobi', CURRENT_DATE + 2) ON CONFLICT DO NOTHING")
 		return err
 	})
+	if err != nil {
+		log.Fatalf("failed to seed tasks for tenant_pioneer: %v", err)
+	}
 
-	_ = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
+	err = d.withTx(ctx, "tenant_safari", func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "INSERT INTO timesheets (id, tenant_id, task_id, user_id, hours, worked_on, status) VALUES ('tsh_safari_1', 'tenant_safari', 'task_safari_install', 'usr_safari_tech', 4.5, CURRENT_DATE, 'Submitted') ON CONFLICT DO NOTHING")
 		return err
 	})
+	if err != nil {
+		log.Fatalf("failed to seed timesheets for tenant_safari: %v", err)
+	}
 }
