@@ -156,9 +156,55 @@ func (d *Database) CheckSerialNumberExists(tenantID, serialNumber string) (bool,
 	return exists, err
 }
 
+func (d *Database) CheckReorderThresholdAndTriggerProcurement(ctx context.Context, tx pgx.Tx, tenantID string, itemName string) error {
+	fn := func(transaction pgx.Tx) error {
+		var threshold int
+		err := transaction.QueryRow(ctx, "SELECT COALESCE(MAX(reorder_threshold), 0) FROM inventory_items WHERE tenant_id = $1 AND name = $2", tenantID, itemName).Scan(&threshold)
+		if err != nil {
+			return err
+		}
+
+		var inStockCount int
+		err = transaction.QueryRow(ctx, "SELECT COUNT(*) FROM inventory_items WHERE tenant_id = $1 AND name = $2 AND status = 'In_Stock'", tenantID, itemName).Scan(&inStockCount)
+		if err != nil {
+			return err
+		}
+
+		if inStockCount <= threshold {
+			var exists bool
+			err = transaction.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM procurement_orders WHERE tenant_id = $1 AND item_name = $2 AND status = 'Bidding')", tenantID, itemName).Scan(&exists)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				procID := "proc_auto_" + uuid.New().String()[:8]
+				_, err = transaction.Exec(ctx, `
+					INSERT INTO procurement_orders (id, tenant_id, request_id, item_name, expected_time, status)
+					VALUES ($1, $2, NULL, $3, $4, 'Bidding')`,
+					procID, tenantID, itemName, time.Now().Add(10*24*time.Hour))
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	if tx != nil {
+		return fn(tx)
+	}
+
+	return d.withTx(ctx, tenantID, func(transaction pgx.Tx) error {
+		return fn(transaction)
+	})
+}
+
 func (d *Database) SaveInventoryItem(item *types.InventoryItem) {
 	ctx := context.Background()
 	_ = d.withTx(ctx, item.TenantID, func(tx pgx.Tx) error {
+		var currentStatus string
+		_ = tx.QueryRow(ctx, "SELECT status FROM inventory_items WHERE id = $1", item.ID).Scan(&currentStatus)
+
 		_, err := tx.Exec(ctx, `
 			INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, assigned_to, region, reorder_threshold)
 			VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8)
@@ -170,7 +216,18 @@ func (d *Database) SaveInventoryItem(item *types.InventoryItem) {
 				region = $7,
 				reorder_threshold = $8`,
 			item.ID, item.TenantID, item.Name, item.SerialNumber, item.Status, item.AssignedTo, item.Region, item.ReorderThreshold)
-		return err
+		if err != nil {
+			return err
+		}
+
+		if currentStatus != "" && currentStatus != item.Status {
+			_, _ = tx.Exec(ctx, `
+				INSERT INTO inventory_history (tenant_id, item_id, from_status, to_status, changed_by, changed_at)
+				VALUES ($1, $2, $3, $4, $5, NOW())`,
+				item.TenantID, item.ID, currentStatus, item.Status, "SYSTEM")
+		}
+
+		return d.CheckReorderThresholdAndTriggerProcurement(ctx, tx, item.TenantID, item.Name)
 	})
 }
 
@@ -357,7 +414,7 @@ func (d *Database) RegisterUserTransaction(id, tenantID, tenantName, name, email
 	user.Region = region
 	user.PasswordHash = passwordHash
 
-	err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
 		var emailExists bool
 		_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(email) = LOWER($1))", user.Email).Scan(&emailExists)
 		if emailExists {
@@ -486,23 +543,7 @@ func (d *Database) ApproveMaterialRequestTransaction(id, tenantID, approverID st
 				Timestamp:   time.Now(),
 			}
 
-			var inStockCount int
-			_ = tx.QueryRow(ctx, "SELECT COUNT(*) FROM inventory_items WHERE tenant_id = $1 AND name = $2 AND status = 'In_Stock'", tenantID, itemName).Scan(&inStockCount)
-
-			var threshold int
-			_ = tx.QueryRow(ctx, "SELECT reorder_threshold FROM inventory_items WHERE id = $1", itemID).Scan(&threshold)
-
-			if inStockCount <= threshold {
-				var exists bool
-				_ = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM procurement_orders WHERE tenant_id = $1 AND item_name = $2 AND status = 'Bidding')", tenantID, itemName).Scan(&exists)
-				if !exists {
-					procID := "proc_auto_" + uuid.New().String()[:8]
-					_, _ = tx.Exec(ctx, `
-						INSERT INTO procurement_orders (id, tenant_id, request_id, item_name, expected_time, status)
-						VALUES ($1, $2, NULL, $3, $4, 'Bidding')`,
-						procID, tenantID, itemName, time.Now().Add(10 * 24 * time.Hour))
-				}
-			}
+			_ = d.CheckReorderThresholdAndTriggerProcurement(ctx, tx, tenantID, itemName)
 
 		} else {
 			_, err = tx.Exec(ctx, "UPDATE material_requests SET status = 'Procuring' WHERE id = $1", id)
@@ -595,8 +636,8 @@ func (d *Database) UpdateRolePermissions(tenantID string, roleName string, permi
 func (d *Database) AllocateInventoryItemTransaction(id string, assignedTo string) error {
 	ctx := context.Background()
 	return d.withTx(ctx, "", func(tx pgx.Tx) error {
-		var tenantID, fromStatus string
-		err := tx.QueryRow(ctx, "SELECT tenant_id, status FROM inventory_items WHERE id = $1", id).Scan(&tenantID, &fromStatus)
+		var tenantID, fromStatus, itemName string
+		err := tx.QueryRow(ctx, "SELECT tenant_id, status, name FROM inventory_items WHERE id = $1", id).Scan(&tenantID, &fromStatus, &itemName)
 		if err != nil {
 			return fmt.Errorf("item %s not found", id)
 		}
@@ -615,7 +656,11 @@ func (d *Database) AllocateInventoryItemTransaction(id string, assignedTo string
 			INSERT INTO inventory_history (tenant_id, item_id, from_status, to_status, changed_by, changed_at)
 			VALUES ($1, $2, $3, 'Assigned', $4, $5)`,
 			tenantID, id, fromStatus, assignedTo, time.Now())
-		return err
+		if err != nil {
+			return err
+		}
+
+		return d.CheckReorderThresholdAndTriggerProcurement(ctx, tx, tenantID, itemName)
 	})
 }
 
@@ -706,6 +751,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		customers         = make(map[string]*types.Customer)
 		materialRequests  = make(map[string]*types.MaterialRequest)
 		procurementOrders = make(map[string]*types.ProcurementOrder)
+		overdueTasks      = make(map[string]*types.Task)
 	)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -916,6 +962,34 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		})
 	})
 
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, title, assigned_to, created_by, status, region, due_date, depends_on FROM tasks WHERE tenant_id = $1 AND due_date < CURRENT_DATE AND status NOT IN ('Completed', 'Approved')", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var t types.Task
+				var assignedTo, dependsOn *string
+				var dueDate *time.Time
+				if err := rows.Scan(&t.ID, &t.TenantID, &t.Title, &assignedTo, &t.CreatedBy, &t.Status, &t.Region, &dueDate, &dependsOn); err == nil {
+					if assignedTo != nil {
+						t.AssignedTo = *assignedTo
+					}
+					if dependsOn != nil {
+						t.DependsOn = *dependsOn
+					}
+					t.DueDate = dueDate
+					mu.Lock()
+					overdueTasks[t.ID] = &t
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
 	if err := g.Wait(); err != nil {
 		log.Printf("GetStateForTenant background query error: %v", err)
 	}
@@ -930,6 +1004,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		"customers":          customers,
 		"material_requests":  materialRequests,
 		"procurement_orders": procurementOrders,
+		"overdue_tasks":      overdueTasks,
 	}
 }
 
