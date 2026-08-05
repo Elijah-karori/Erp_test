@@ -1165,6 +1165,83 @@ func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[stri
 
 func (d *Database) SeedIfNeeded() {
 	ctx := context.Background()
+
+	// Robust self-healing schema migration for existing databases
+	upgradeSQL := `
+	-- Ensure manager_id column exists in users
+	ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_id text;
+
+	-- Ensure invitations table exists
+	CREATE TABLE IF NOT EXISTS invitations (
+		id         text primary key,
+		tenant_id  text not null references tenants(id) on delete cascade,
+		email      text not null,
+		name       text not null,
+		role_name  text not null,
+		region     text not null,
+		manager_id text,
+		token      text not null unique,
+		status     text not null default 'Pending',
+		created_at timestamptz not null default now()
+	);
+
+	-- Ensure indexes and RLS for invitations exist
+	CREATE INDEX IF NOT EXISTS idx_invitations_tenant ON invitations(tenant_id);
+	CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token);
+	ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
+	ALTER TABLE invitations FORCE ROW LEVEL SECURITY;
+
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM pg_policies WHERE tablename = 'invitations' AND policyname = 'tenant_isolation'
+		) THEN
+			CREATE POLICY tenant_isolation ON invitations USING (tenant_id = current_setting('app.current_tenant_id', true));
+		END IF;
+	END
+	$$;
+
+	-- Ensure support_tickets table exists
+	CREATE TABLE IF NOT EXISTS support_tickets (
+		id          text primary key,
+		tenant_id   text not null references tenants(id) on delete cascade,
+		customer_id text not null references customers(id) on delete cascade,
+		title       text not null,
+		description text,
+		status      text not null default 'Open',
+		task_id     text,
+		created_at  timestamptz not null default now()
+	);
+
+	-- Ensure indexes and RLS for support_tickets exist
+	CREATE INDEX IF NOT EXISTS idx_support_tickets_tenant ON support_tickets(tenant_id);
+	CREATE INDEX IF NOT EXISTS idx_support_tickets_customer ON support_tickets(customer_id);
+	ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
+	ALTER TABLE support_tickets FORCE ROW LEVEL SECURITY;
+
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM pg_policies WHERE tablename = 'support_tickets' AND policyname = 'tenant_isolation'
+		) THEN
+			CREATE POLICY tenant_isolation ON support_tickets USING (tenant_id = current_setting('app.current_tenant_id', true));
+		END IF;
+	END
+	$$;
+
+	-- Ensure manager_id foreign key constraint is present on users
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM pg_constraint WHERE conname = 'users_manager_id_fkey'
+		) THEN
+			ALTER TABLE users ADD CONSTRAINT users_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL;
+		END IF;
+	END
+	$$;
+	`
+	_, _ = d.Pool.Exec(ctx, upgradeSQL)
+
 	var count int
 	err := d.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM tenants").Scan(&count)
 	if err != nil {

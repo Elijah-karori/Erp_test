@@ -43,6 +43,7 @@ type RegisterPayload struct {
 type LoginPayload struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	TenantID string `json:"tenant_id"`
 }
 
 type authResponse struct {
@@ -119,6 +120,9 @@ func (h *AuthHandler) LoginHandler(c echo.Context) error {
 	user, err := h.db.GetUserByEmail(p.Email)
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": genericErr})
+	}
+	if p.TenantID != "" && user.TenantID != p.TenantID {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid tenant space, email or password"})
 	}
 	if !auth.CheckPassword(user.PasswordHash, p.Password) {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": genericErr})
