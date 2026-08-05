@@ -241,3 +241,28 @@ type AuditAlert struct {
 	Reason    string `json:"reason"`
 	Violation string `json:"violation"`
 }
+
+// SupportTicket model representing customer issues/tickets
+type SupportTicket struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	CustomerID  string    `json:"customer_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"` // 'Open', 'Converted', 'Closed'
+	TaskID      string    `json:"task_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CreateSupportTicketCommand struct {
+	CustomerID  string `json:"customer_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type ConvertTicketToTaskCommand struct {
+	TicketID   string `json:"ticket_id"`
+	Title      string `json:"title"`
+	AssignedTo string `json:"assigned_to"`
+	DependsOn  string `json:"depends_on,omitempty"`
+}

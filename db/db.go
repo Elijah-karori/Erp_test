@@ -270,6 +270,67 @@ func (d *Database) SaveInvoice(invoice *types.Invoice) {
 	})
 }
 
+func (d *Database) CreateSupportTicket(ticket *types.SupportTicket) error {
+	ctx := context.Background()
+	return d.withTx(ctx, ticket.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO support_tickets (id, tenant_id, customer_id, title, description, status, task_id, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)`,
+			ticket.ID, ticket.TenantID, ticket.CustomerID, ticket.Title, ticket.Description, ticket.Status, ticket.TaskID, ticket.CreatedAt)
+		return err
+	})
+}
+
+func (d *Database) GetSupportTicket(id string) (*types.SupportTicket, error) {
+	ctx := context.Background()
+	var t types.SupportTicket
+	var taskID *string
+	err := d.withTx(ctx, "", func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, "SELECT id, tenant_id, customer_id, title, description, status, task_id, created_at FROM support_tickets WHERE id = $1", id)
+		return row.Scan(&t.ID, &t.TenantID, &t.CustomerID, &t.Title, &t.Description, &t.Status, &taskID, &t.CreatedAt)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if taskID != nil {
+		t.TaskID = *taskID
+	}
+	return &t, nil
+}
+
+func (d *Database) ConvertTicketToTaskTransaction(ticketID, tenantID, taskID string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE support_tickets SET status = 'Converted', task_id = $1 WHERE id = $2 AND tenant_id = $3", taskID, ticketID, tenantID)
+		return err
+	})
+}
+
+func (d *Database) IsSubordinateRecursive(tenantID string, managerID, subordinateID string) bool {
+	if managerID == subordinateID {
+		return true
+	}
+	ctx := context.Background()
+	current := subordinateID
+	var mID *string
+
+	// Max 10 levels deep to prevent cycles or deep recursion issues
+	for i := 0; i < 10 && current != ""; i++ {
+		err := d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+			row := tx.QueryRow(ctx, "SELECT manager_id FROM users WHERE tenant_id = $1 AND id = $2", tenantID, current)
+			return row.Scan(&mID)
+		})
+		if err != nil || mID == nil {
+			break
+		}
+		if *mID == managerID {
+			return true
+		}
+		current = *mID
+	}
+	return false
+}
+
 func (d *Database) GetInvoice(id string) (*types.Invoice, error) {
 	ctx := context.Background()
 	var inv types.Invoice
@@ -741,7 +802,7 @@ func (d *Database) GetRolesForTenant(tenantID string) map[string][]string {
 	return roles
 }
 
-func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
+func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[string]interface{} {
 	ctx := context.Background()
 
 	var (
@@ -757,6 +818,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		procurementOrders = make(map[string]*types.ProcurementOrder)
 		overdueTasks      = make(map[string]*types.Task)
 		invitations       = make(map[string]*types.Invitation)
+		supportTickets    = make(map[string]*types.SupportTicket)
 	)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -1014,8 +1076,75 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		})
 	})
 
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, customer_id, title, description, status, COALESCE(task_id, ''), created_at FROM support_tickets WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var ticket types.SupportTicket
+				if err := rows.Scan(&ticket.ID, &ticket.TenantID, &ticket.CustomerID, &ticket.Title, &ticket.Description, &ticket.Status, &ticket.TaskID, &ticket.CreatedAt); err == nil {
+					mu.Lock()
+					supportTickets[ticket.ID] = &ticket
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
 	if err := g.Wait(); err != nil {
 		log.Printf("GetStateForTenant background query error: %v", err)
+	}
+
+	// In-memory hierarchical permission-based filtering
+	if roleName != "tenant_admin" && roleName != "" {
+		isSubordinate := func(mgrID, subID string) bool {
+			if mgrID == subID {
+				return true
+			}
+			current := subID
+			for i := 0; i < 10 && current != ""; i++ {
+				u, exists := users[current]
+				if !exists || u.ManagerID == "" {
+					break
+				}
+				if u.ManagerID == mgrID {
+					return true
+				}
+				current = u.ManagerID
+			}
+			return false
+		}
+
+		// Filter tasks
+		filteredTasks := make(map[string]*types.Task)
+		for k, t := range tasks {
+			if t.AssignedTo == userID || t.CreatedBy == userID || (roleName == "manager" && isSubordinate(userID, t.AssignedTo)) {
+				filteredTasks[k] = t
+			}
+		}
+		tasks = filteredTasks
+
+		// Filter timesheets
+		filteredTimesheets := make(map[string]*types.Timesheet)
+		for k, ts := range timesheets {
+			if ts.UserID == userID || (roleName == "manager" && isSubordinate(userID, ts.UserID)) {
+				filteredTimesheets[k] = ts
+			}
+		}
+		timesheets = filteredTimesheets
+
+		// Filter overdue tasks
+		filteredOverdue := make(map[string]*types.Task)
+		for k, t := range overdueTasks {
+			if t.AssignedTo == userID || t.CreatedBy == userID || (roleName == "manager" && isSubordinate(userID, t.AssignedTo)) {
+				filteredOverdue[k] = t
+			}
+		}
+		overdueTasks = filteredOverdue
 	}
 
 	return map[string]interface{}{
@@ -1030,6 +1159,7 @@ func (d *Database) GetStateForTenant(tenantID string) map[string]interface{} {
 		"procurement_orders": procurementOrders,
 		"overdue_tasks":      overdueTasks,
 		"invitations":        invitations,
+		"support_tickets":    supportTickets,
 	}
 }
 
