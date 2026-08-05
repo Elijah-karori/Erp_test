@@ -91,6 +91,22 @@ create table customers (
 create index idx_customers_tenant on customers(tenant_id);
 
 -- ============================================================
+-- SUPPORT TICKETS
+-- ============================================================
+create table support_tickets (
+    id          text primary key,
+    tenant_id   text not null references tenants(id) on delete cascade,
+    customer_id text not null references customers(id) on delete cascade,
+    title       text not null,
+    description text,
+    status      text not null default 'Open', -- 'Open', 'Converted', 'Closed'
+    task_id     text, -- populated once converted to task
+    created_at  timestamptz not null default now()
+);
+create index idx_support_tickets_tenant on support_tickets(tenant_id);
+create index idx_support_tickets_customer on support_tickets(customer_id);
+
+-- ============================================================
 -- INVENTORY
 -- ============================================================
 create table inventory_items (
@@ -234,6 +250,8 @@ alter table erp_logs enable row level security;
 alter table erp_logs force row level security;
 alter table invitations enable row level security;
 alter table invitations force row level security;
+alter table support_tickets enable row level security;
+alter table support_tickets force row level security;
 
 -- One policy per table, all following the same shape: only rows whose
 -- tenant_id matches the session variable the Go app sets per request.
@@ -249,6 +267,7 @@ create policy tenant_isolation on tasks             using (tenant_id = current_s
 create policy tenant_isolation on timesheets        using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on erp_logs          using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on invitations       using (tenant_id = current_setting('app.current_tenant_id', true));
+create policy tenant_isolation on support_tickets   using (tenant_id = current_setting('app.current_tenant_id', true));
 
 -- The app connects with a single Postgres role (not per-tenant DB roles),
 -- so grant that role bypass-free access and let RLS above do the filtering.

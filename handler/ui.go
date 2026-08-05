@@ -53,6 +53,19 @@ type UpdateUserRolePayload struct {
 	RoleName string `json:"role_name"`
 }
 
+type CreateSupportTicketPayload struct {
+	CustomerID  string `json:"customer_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type ConvertTicketToTaskPayload struct {
+	TicketID   string `json:"ticket_id"`
+	Title      string `json:"title"`
+	AssignedTo string `json:"assigned_to"`
+	DependsOn  string `json:"depends_on"`
+}
+
 type UpdateRBACPayload struct {
 	RoleName    string   `json:"role_name"`
 	Permissions []string `json:"permissions"`
@@ -283,6 +296,130 @@ func (h *UIHandler) UpdateUserRole(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Role assigned successfully"})
 }
 
+func (h *UIHandler) CreateSupportTicket(c echo.Context) error {
+	var payload CreateSupportTicketPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if payload.CustomerID == "" || payload.Title == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "customer_id and title are required"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+
+	ticket := &types.SupportTicket{
+		ID:          "ticket_" + uuid.NewString()[:8],
+		TenantID:    tenantID,
+		CustomerID:  payload.CustomerID,
+		Title:       payload.Title,
+		Description: payload.Description,
+		Status:      "Open",
+		CreatedAt:   time.Now(),
+	}
+
+	if err := h.db.CreateSupportTicket(ticket); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "CreateTicket_Success", fmt.Sprintf("Support ticket %s created for customer %s", ticket.ID, ticket.CustomerID))
+
+	return c.JSON(http.StatusOK, ticket)
+}
+
+func (h *UIHandler) ConvertTicketToTask(c echo.Context) error {
+	var payload ConvertTicketToTaskPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if payload.TicketID == "" || payload.Title == "" || payload.AssignedTo == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ticket_id, title, and assigned_to are required"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+
+	ticket, err := h.db.GetSupportTicket(payload.TicketID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "support ticket not found"})
+	}
+
+	if ticket.TenantID != tenantID {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized: tenant mismatch"})
+	}
+
+	taskID := "task_" + uuid.NewString()[:8]
+	now := time.Now().Add(5 * 24 * time.Hour) // default due date is 5 days from now
+	task := &types.Task{
+		ID:         taskID,
+		TenantID:   tenantID,
+		Title:      payload.Title,
+		AssignedTo: payload.AssignedTo,
+		CreatedBy:  userID,
+		Status:     "Pending",
+	}
+
+	// Fetch assignee details to set task region
+	assigneeUser, errUser := h.db.GetUser(payload.AssignedTo)
+	if errUser == nil && assigneeUser != nil {
+		task.Region = assigneeUser.Region
+	} else {
+		task.Region = "Nairobi" // fallback
+	}
+	task.DueDate = &now
+	task.DependsOn = payload.DependsOn
+
+	h.db.SaveTask(task)
+
+	if err := h.db.ConvertTicketToTaskTransaction(payload.TicketID, tenantID, taskID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "ConvertTicket_Success", fmt.Sprintf("Converted ticket %s to task %s assigned to %s", payload.TicketID, taskID, payload.AssignedTo))
+
+	// Send Email alerts to the manager/leader!
+	if h.emailSvc != nil {
+		// Look up the assignee's manager/leader to alert them
+		if assigneeUser != nil && assigneeUser.ManagerID != "" {
+			managerUser, errMgr := h.db.GetUser(assigneeUser.ManagerID)
+			if errMgr == nil && managerUser != nil {
+				subject := fmt.Sprintf("ERP Alert: New Task Assignment for Subordinate (%s)", assigneeUser.Name)
+				body := fmt.Sprintf(`<h2>New Task Assignment Alert</h2>
+<p>Hello %s,</p>
+<p>A new customer support ticket has been converted into a task and assigned to your team member <strong>%s</strong>:</p>
+<ul>
+  <li><strong>Task ID:</strong> %s</li>
+  <li><strong>Task Title:</strong> %s</li>
+  <li><strong>Converted From Ticket:</strong> %s</li>
+</ul>
+<p>Please check your team tracking dashboard to supervise progress.</p>
+<p>Best regards,<br>ERP Support System</p>`, managerUser.Name, assigneeUser.Name, taskID, payload.Title, payload.TicketID)
+				_ = h.emailSvc.SendEmail(managerUser.Email, subject, body, true)
+			}
+		}
+
+		// Also alert the assignee
+		if assigneeUser != nil {
+			subject := "ERP Alert: You have been assigned a new task"
+			body := fmt.Sprintf(`<h2>New Task Assigned</h2>
+<p>Hello %s,</p>
+<p>A new task has been assigned to you:</p>
+<ul>
+  <li><strong>Task ID:</strong> %s</li>
+  <li><strong>Task Title:</strong> %s</li>
+  <li><strong>Due Date:</strong> %s</li>
+</ul>
+<p>Please log in to your technician dashboard to start and execute this task.</p>
+<p>Best regards,<br>ERP Support System</p>`, assigneeUser.Name, taskID, payload.Title, now.Format("2006-01-02"))
+			_ = h.emailSvc.SendEmail(assigneeUser.Email, subject, body, true)
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Ticket converted to task successfully", "task_id": taskID})
+}
+
 // ServeActivationPage returns the Tailwind-styled activation page
 func (h *UIHandler) ServeActivationPage(c echo.Context) error {
 	return c.HTML(http.StatusOK, activationHtmlContent)
@@ -293,7 +430,9 @@ func (h *UIHandler) ServeActivationPage(c echo.Context) error {
 // invoices, and inventory to any authenticated caller regardless of role.
 func (h *UIHandler) GetState(c echo.Context) error {
 	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
-	state := h.db.GetStateForTenant(tenantID)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+	roleName, _ := c.Get(middleware.ContextRoles).(string)
+	state := h.db.GetStateForTenant(tenantID, userID, roleName)
 	// Roles are global permission definitions, not tenant data, so it's safe
 	// to include them unfiltered — the UI needs the full set to render the
 	// RBAC policy grid.
@@ -645,6 +784,59 @@ const htmlContent = `
                             </table>
                         </div>
                     </div>
+
+                    <!-- Customer Support & Troubleshooting Tickets -->
+                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm space-y-6">
+                        <div class="flex items-center justify-between border-b border-brand-600 pb-3">
+                            <h3 class="font-bold text-md text-emerald-400 flex items-center gap-2">
+                                <i class="fa-solid fa-headset"></i>
+                                <span>Customer Support Tickets &amp; Troubleshooting Desk</span>
+                            </h3>
+                            <span class="text-xs text-slate-400 uppercase font-bold tracking-widest font-mono">Convert Tickets to Dispatch Tasks</span>
+                        </div>
+
+                        <!-- Raise Support Ticket form -->
+                        <form id="createTicketForm" onsubmit="createSupportTicket(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-brand-900 rounded-lg border border-brand-600 text-xs">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Select Client ID</label>
+                                <select id="ticketCustID" class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-slate-100 focus:outline-none">
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Issue / Ticket Title</label>
+                                <input type="text" id="ticketTitle" placeholder="Fibre drops packets constantly" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-slate-100 focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Problem Description</label>
+                                <input type="text" id="ticketDesc" placeholder="Drops line every 10 mins during STK push" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-slate-100 focus:outline-none">
+                            </div>
+                            <div class="flex items-end">
+                                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded transition duration-200">
+                                    File Support Ticket
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Support Tickets Ledger -->
+                        <div class="overflow-x-auto w-full max-w-full block">
+                            <table class="w-full text-left text-xs min-w-[700px]">
+                                <thead>
+                                    <tr class="border-b border-brand-600 text-slate-400 font-semibold uppercase">
+                                        <th class="py-2.5 px-3">Ticket ID</th>
+                                        <th class="py-2.5 px-3">Client</th>
+                                        <th class="py-2.5 px-3">Issue Title</th>
+                                        <th class="py-2.5 px-3">Description</th>
+                                        <th class="py-2.5 px-3">Status</th>
+                                        <th class="py-2.5 px-3">Linked Task ID</th>
+                                        <th class="py-2.5 px-3 text-right">Escalation Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ticketsTableBody" class="divide-y divide-brand-600 text-slate-300 font-mono text-[11px]">
+                                    <tr><td colspan="7" class="p-3 text-slate-500 italic text-center">No active support tickets.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Module C: Finance View -->
@@ -960,6 +1152,46 @@ const htmlContent = `
                     Create Account
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- CONVERT TICKET TO TASK MODAL -->
+    <div id="convertTicketModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
+        <div class="bg-brand-500 rounded-2xl border border-brand-600 p-6 max-w-sm w-full space-y-4">
+            <div class="flex justify-between items-center border-b border-brand-600 pb-2">
+                <h4 class="font-bold text-md text-emerald-300 flex items-center gap-2">
+                    <i class="fa-solid fa-wrench"></i>
+                    <span>Convert Ticket to Task</span>
+                </h4>
+                <button onclick="closeConvertModal()" class="text-slate-400 hover:text-slate-200"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="convertForm" onsubmit="handleConvertTicket(event)" class="space-y-4 text-xs">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Ticket ID</label>
+                    <input type="text" id="convertTicketId" readonly class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-400">
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Task Title</label>
+                    <input type="text" id="convertTaskTitle" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Assign To (Technician)</label>
+                    <select id="convertAssignee" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Task Dependency (Depends On - Optional)</label>
+                    <select id="convertDependency" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                        <option value="">No Dependency</option>
+                    </select>
+                </div>
+
+                <div class="pt-2 border-t border-brand-600 flex justify-end gap-2">
+                    <button type="button" onclick="closeConvertModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 font-bold px-4 py-2 rounded">Cancel</button>
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded">Assign Task</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -1730,13 +1962,19 @@ const htmlContent = `
                 });
             }
 
-            // Render Customers CRM
+            // Render Customers CRM & Populate Support Ticket Client Dropdown
             const custBody = document.getElementById('customersTableBody');
+            const ticketCustDropdown = document.getElementById('ticketCustID');
             if (custBody) {
                 custBody.innerHTML = '';
+                if (ticketCustDropdown) {
+                    ticketCustDropdown.innerHTML = '';
+                }
+
                 Object.values(currentState.customers || {}).forEach(c => {
                     if (c.tenant_id !== activeTenant) return;
 
+                    // Add to customer list table
                     const tr = document.createElement('tr');
                     tr.className = 'hover:bg-brand-600 transition';
 
@@ -1752,7 +1990,54 @@ const htmlContent = `
                         '<td class="py-3 px-4 font-semibold">' + c.dispatch_status + '</td>' +
                         '<td class="py-3 px-4 text-right">' + dispatchBtn + '</td>';
                     custBody.appendChild(tr);
+
+                    // Add to ticket customer options dropdown list
+                    if (ticketCustDropdown) {
+                        const opt = document.createElement('option');
+                        opt.value = c.id;
+                        opt.textContent = c.name + ' (' + c.id + ')';
+                        ticketCustDropdown.appendChild(opt);
+                    }
                 });
+            }
+
+            // Render Customer Support Tickets Table
+            const ticketsBody = document.getElementById('ticketsTableBody');
+            if (ticketsBody) {
+                ticketsBody.innerHTML = '';
+                const activeTickets = Object.values(currentState.support_tickets || {}).filter(t => t.tenant_id === activeTenant);
+
+                if (activeTickets.length === 0) {
+                    ticketsBody.innerHTML = '<tr><td colspan="7" class="p-3 text-slate-500 italic text-center">No active support tickets.</td></tr>';
+                } else {
+                    const isLeader = activeRole === 'tenant_admin' || activeRole === 'manager';
+                    activeTickets.forEach(t => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-brand-600 transition';
+
+                        const statusColor = t.status === 'Open' ? 'text-amber-400 font-bold' : 'text-emerald-400 font-semibold';
+
+                        let actionBtn = '<span class="text-slate-500 italic">No Action</span>';
+                        if (t.status === 'Open') {
+                            if (isLeader) {
+                                actionBtn = '<button onclick="openConvertModal(\'' + t.id + '\', \'' + t.title.replace(/'/g, "\\'") + '\')" class="text-[10px] bg-indigo-600 hover:bg-indigo-500 font-bold text-white px-2 py-1 rounded">Convert to Task</button>';
+                            } else {
+                                actionBtn = '<span class="text-amber-400 italic">Awaiting Leader</span>';
+                            }
+                        } else {
+                            actionBtn = '<span class="text-emerald-400"><i class="fa-solid fa-circle-check"></i> Converted</span>';
+                        }
+
+                        tr.innerHTML = '<td class="py-2.5 px-3 font-bold">' + t.id + '</td>' +
+                            '<td class="py-2.5 px-3 font-semibold text-emerald-400">' + t.customer_id + '</td>' +
+                            '<td class="py-2.5 px-3 font-bold text-white">' + t.title + '</td>' +
+                            '<td class="py-2.5 px-3 text-slate-300">' + t.description + '</td>' +
+                            '<td class="py-2.5 px-3 ' + statusColor + '">' + t.status + '</td>' +
+                            '<td class="py-2.5 px-3 text-indigo-300 font-bold">' + (t.task_id || '-') + '</td>' +
+                            '<td class="py-2.5 px-3 text-right">' + actionBtn + '</td>';
+                        ticketsBody.appendChild(tr);
+                    });
+                }
             }
 
             // Render Users Personnel Key directory
@@ -2073,6 +2358,100 @@ const htmlContent = `
             currentState.customers[customerId].device_id = deviceId;
             currentState.customers[customerId].dispatch_status = "Dispatched";
             fetchState();
+        }
+
+        async function createSupportTicket(e) {
+            e.preventDefault();
+            const customer_id = document.getElementById('ticketCustID').value;
+            const title = document.getElementById('ticketTitle').value;
+            const description = document.getElementById('ticketDesc').value;
+
+            try {
+                const res = await fetch('/api/tickets', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ customer_id, title, description })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('TICKET_CREATED', 'Support ticket ' + r.id + ' successfully registered.');
+                    document.getElementById('ticketTitle').value = '';
+                    document.getElementById('ticketDesc').value = '';
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function openConvertModal(ticketId, ticketTitle) {
+            document.getElementById('convertTicketId').value = ticketId;
+            document.getElementById('convertTaskTitle').value = 'Troubleshoot: ' + ticketTitle;
+
+            const activeTenant = currentUser.tenant_id;
+
+            // Populate assignee dropdown options with technicians and managers under active tenant
+            const assignSelect = document.getElementById('convertAssignee');
+            if (assignSelect) {
+                assignSelect.innerHTML = '';
+                Object.values(currentState.users || {}).forEach(u => {
+                    if (u.tenant_id === activeTenant) {
+                        const opt = document.createElement('option');
+                        opt.value = u.id;
+                        opt.textContent = u.name + ' (' + u.role_name + ')';
+                        assignSelect.appendChild(opt);
+                    }
+                });
+            }
+
+            // Populate dependency dropdown list with other existing tasks
+            const depSelect = document.getElementById('convertDependency');
+            if (depSelect) {
+                depSelect.innerHTML = '<option value="">No Dependency (Independent)</option>';
+                Object.values(currentState.tasks || {}).forEach(t => {
+                    if (t.tenant_id === activeTenant) {
+                        const opt = document.createElement('option');
+                        opt.value = t.id;
+                        opt.textContent = t.title + ' (Status: ' + t.status + ')';
+                        depSelect.appendChild(opt);
+                    }
+                });
+            }
+
+            document.getElementById('convertTicketModal').classList.remove('hidden');
+        }
+
+        function closeConvertModal() {
+            document.getElementById('convertTicketModal').classList.add('hidden');
+            document.getElementById('convertForm').reset();
+        }
+
+        async function handleConvertTicket(e) {
+            e.preventDefault();
+            const ticket_id = document.getElementById('convertTicketId').value;
+            const title = document.getElementById('convertTaskTitle').value;
+            const assigned_to = document.getElementById('convertAssignee').value;
+            const depends_on = document.getElementById('convertDependency').value;
+
+            try {
+                const res = await fetch('/api/tickets/convert', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ ticket_id, title, assigned_to, depends_on })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('TICKET_CONVERTED', 'Ticket successfully converted into Task ' + r.task_id);
+                    closeConvertModal();
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
         }
 
         function switchUsersTab(tab) {

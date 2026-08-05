@@ -38,6 +38,7 @@ func cleanAndSeedDB(t *testing.T) *db.Database {
 	tables := []string{
 		"timesheets", "tasks", "payments", "invoices", "procurement_orders",
 		"material_requests", "inventory_history", "inventory_items", "users", "roles", "tenants", "erp_logs",
+		"invitations", "customers", "support_tickets",
 	}
 	for _, table := range tables {
 		_, _ = pool.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table))
@@ -399,4 +400,42 @@ func TestInvitationAndHierarchy(t *testing.T) {
 
 	dbUser, _ = database.GetUser(user.ID)
 	assert.Equal(t, "manager", dbUser.RoleName)
+}
+
+func TestSupportTicketsAndTasks(t *testing.T) {
+	database := cleanAndSeedDB(t)
+	defer database.Pool.Close()
+
+	// 1. Create a support ticket
+	ticket := &types.SupportTicket{
+		ID:          "ticket_test_1",
+		TenantID:    "tenant_safari",
+		CustomerID:  "cust_saf_77",
+		Title:       "Fibre line dropping packets",
+		Description: "The fibre drops connection every 5 minutes",
+		Status:      "Open",
+		CreatedAt:   time.Now(),
+	}
+
+	err := database.CreateSupportTicket(ticket)
+	assert.NoError(t, err)
+
+	// 2. Retrieve ticket
+	retrieved, err := database.GetSupportTicket("ticket_test_1")
+	assert.NoError(t, err)
+	assert.NotNil(t, retrieved)
+	assert.Equal(t, "Fibre line dropping packets", retrieved.Title)
+	assert.Equal(t, "cust_saf_77", retrieved.CustomerID)
+	assert.Equal(t, "Open", retrieved.Status)
+
+	// 3. Convert to task
+	taskID := "task_test_1"
+	err = database.ConvertTicketToTaskTransaction("ticket_test_1", "tenant_safari", taskID)
+	assert.NoError(t, err)
+
+	// 4. Verify updated ticket
+	retrieved, err = database.GetSupportTicket("ticket_test_1")
+	assert.NoError(t, err)
+	assert.Equal(t, "Converted", retrieved.Status)
+	assert.Equal(t, taskID, retrieved.TaskID)
 }
