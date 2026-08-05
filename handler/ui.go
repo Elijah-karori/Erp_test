@@ -530,6 +530,10 @@ const htmlContent = `
                     <input type="email" id="loginEmail" placeholder="alice@safari.test" required autocomplete="username" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
                 </div>
                 <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">Tenant Space ID (Optional)</label>
+                    <input type="text" id="loginTenantID" placeholder="tenant_safari" autocomplete="organization" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                </div>
+                <div>
                     <label class="block text-xs font-bold text-slate-400 mb-1">Password</label>
                     <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
                 </div>
@@ -1391,6 +1395,7 @@ const htmlContent = `
         async function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('loginEmail').value;
+            const tenant_id = document.getElementById('loginTenantID').value.trim();
             const password = document.getElementById('loginPassword').value;
             document.getElementById('loginError').classList.add('hidden');
 
@@ -1398,7 +1403,7 @@ const htmlContent = `
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify({ email, password, tenant_id })
                 });
                 const r = await res.json();
                 if (!res.ok) {
