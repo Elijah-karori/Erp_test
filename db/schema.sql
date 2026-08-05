@@ -49,11 +49,30 @@ create table users (
     role_name     text not null,
     region        text not null,
     password_hash text not null,
+    manager_id    text references users(id),
     created_at    timestamptz not null default now(),
     foreign key (tenant_id, role_name) references roles(tenant_id, name)
 );
 create index idx_users_tenant on users(tenant_id);
 create index idx_users_email on users(lower(email));
+
+-- ============================================================
+-- INVITATIONS
+-- ============================================================
+create table invitations (
+    id         text primary key,
+    tenant_id  text not null references tenants(id) on delete cascade,
+    email      text not null,
+    name       text not null,
+    role_name  text not null,
+    region     text not null,
+    manager_id text,
+    token      text not null unique,
+    status     text not null default 'Pending', -- 'Pending', 'Accepted', 'Expired'
+    created_at timestamptz not null default now()
+);
+create index idx_invitations_tenant on invitations(tenant_id);
+create index idx_invitations_token on invitations(token);
 
 -- ============================================================
 -- CUSTOMERS
@@ -213,6 +232,8 @@ alter table timesheets enable row level security;
 alter table timesheets force row level security;
 alter table erp_logs enable row level security;
 alter table erp_logs force row level security;
+alter table invitations enable row level security;
+alter table invitations force row level security;
 
 -- One policy per table, all following the same shape: only rows whose
 -- tenant_id matches the session variable the Go app sets per request.
@@ -227,6 +248,7 @@ create policy tenant_isolation on payments          using (tenant_id = current_s
 create policy tenant_isolation on tasks             using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on timesheets        using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on erp_logs          using (tenant_id = current_setting('app.current_tenant_id', true));
+create policy tenant_isolation on invitations       using (tenant_id = current_setting('app.current_tenant_id', true));
 
 -- The app connects with a single Postgres role (not per-tenant DB roles),
 -- so grant that role bypass-free access and let RLS above do the filtering.

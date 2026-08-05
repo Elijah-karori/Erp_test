@@ -14,6 +14,7 @@ import (
 
 	"erp-event-bus/consumer"
 	"erp-event-bus/db"
+	"erp-event-bus/email"
 	"erp-event-bus/handler"
 	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
@@ -21,6 +22,7 @@ import (
 )
 
 func main() {
+	emailSvc := email.NewEmailService()
 	bus, err := eventbus.Start()
 	if err != nil {
 		log.Fatalf("failed to start embedded event bus: %v", err)
@@ -76,7 +78,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_ = consumer.StartERPProcessors(ctx, nc, database, sqliteDB)
+	_ = consumer.StartERPProcessors(ctx, nc, database, sqliteDB, emailSvc)
 
 	// 6. Initialize Echo Server
 	e := echo.New()
@@ -84,14 +86,17 @@ func main() {
 	e.Use(echo_middleware.Recover())
 
 	// UI Dashboard Endpoint (No Auth header required for page load itself)
-	uiHandler := handler.NewUIHandler(database, sqliteDB)
+	uiHandler := handler.NewUIHandler(database, sqliteDB, emailSvc)
 	e.GET("/", uiHandler.ServeDashboard)
+	e.GET("/activate.html", uiHandler.ServeActivationPage)
 
 	// Public auth endpoints — no token required to reach these, since this
 	// is where a token comes from in the first place.
-	authHandler := handler.NewAuthHandler(database, sqliteDB)
+	authHandler := handler.NewAuthHandler(database, sqliteDB, emailSvc)
 	e.POST("/api/register", authHandler.RegisterHandler)
 	e.POST("/api/login", authHandler.LoginHandler)
+	e.GET("/api/invite/preview", uiHandler.PreviewInvitation)
+	e.POST("/api/activate", uiHandler.ActivateUser)
 
 	// Every other /api route requires a verified JWT from here on.
 	api := e.Group("/api")
@@ -107,6 +112,9 @@ func main() {
 	// Previously ungated — any caller could create a user with any role,
 	// including tenant_admin. Now requires an authenticated admin.
 	api.POST("/users", uiHandler.CreateUser, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/users/invite", uiHandler.InviteUser, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/users/update-manager", uiHandler.UpdateUserManager, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/users/update-role", uiHandler.UpdateUserRole, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	// Previously registered directly on `e`, bypassing JWTAuthMiddleware
 	// entirely — anyone could download the full audit log with no token.
 	api.GET("/exports/excel", uiHandler.ExportLogsExcel)

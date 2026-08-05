@@ -3,22 +3,54 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"erp-event-bus/auth"
 	"erp-event-bus/db"
+	"erp-event-bus/email"
 	"erp-event-bus/middleware"
+	"erp-event-bus/types"
 )
 
 type UIHandler struct {
 	db       *db.Database
 	sqliteDB *db.SQLiteDB
+	emailSvc *email.EmailService
 }
 
-func NewUIHandler(database *db.Database, sdb *db.SQLiteDB) *UIHandler {
-	return &UIHandler{db: database, sqliteDB: sdb}
+func NewUIHandler(database *db.Database, sdb *db.SQLiteDB, emailSvc *email.EmailService) *UIHandler {
+	return &UIHandler{db: database, sqliteDB: sdb, emailSvc: emailSvc}
+}
+
+type InvitePayload struct {
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	RoleName  string `json:"role_name"`
+	Region    string `json:"region"`
+	ManagerID string `json:"manager_id"`
+}
+
+type ActivatePayload struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
+}
+
+type UpdateManagerPayload struct {
+	UserID    string `json:"user_id"`
+	ManagerID string `json:"manager_id"`
+}
+
+type UpdateRolePayload struct {
+	UserID   string `json:"user_id"`
+	RoleName string `json:"role_name"`
+}
+
+type UpdateUserRolePayload struct {
+	UserID   string `json:"user_id"`
+	RoleName string `json:"role_name"`
 }
 
 type UpdateRBACPayload struct {
@@ -92,6 +124,168 @@ func (h *UIHandler) CreateUser(c echo.Context) error {
 		"message":       "User registered successfully",
 		"temp_password": tempPassword,
 	})
+}
+
+// InviteUser creates a workspace invitation and dispatches an activation email
+func (h *UIHandler) InviteUser(c echo.Context) error {
+	var p InvitePayload
+	if err := c.Bind(&p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	if p.Email == "" || p.Name == "" || p.RoleName == "" || p.Region == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "email, name, role_name, and region are required"})
+	}
+
+	token := uuid.NewString()
+	inv := &types.Invitation{
+		ID:        "inv_" + uuid.NewString()[:12],
+		TenantID:  tenantID,
+		Email:     p.Email,
+		Name:      p.Name,
+		RoleName:  p.RoleName,
+		Region:    p.Region,
+		ManagerID: p.ManagerID,
+		Token:     token,
+		Status:    "Pending",
+		CreatedAt: time.Now(),
+	}
+
+	if err := h.db.CreateInvitation(inv); err != nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	}
+
+	// Construct activation URL
+	activationUrl := fmt.Sprintf("http://localhost:8080/activate.html?token=%s&tenant_id=%s&role_assignment_id=%s", token, tenantID, p.RoleName)
+
+	// Send Invite Email
+	if err := h.emailSvc.SendInviteEmail(p.Email, p.Name, activationUrl, tenantID, p.RoleName); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to dispatch invite email"})
+	}
+
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, userID, "InviteUser_Success", fmt.Sprintf("Sent workspace invitation to %s with token", p.Email))
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Invitation sent successfully",
+		"token":   token,
+		"url":     activationUrl,
+	})
+}
+
+// PreviewInvitation lets the public activation page load invitation metadata safely
+func (h *UIHandler) PreviewInvitation(c echo.Context) error {
+	token := c.QueryParam("token")
+	if token == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "token is required"})
+	}
+
+	inv, err := h.db.GetInvitationByToken(token)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "invitation not found"})
+	}
+
+	return c.JSON(http.StatusOK, inv)
+}
+
+// ActivateUser completes the registration process of an invited teammate
+func (h *UIHandler) ActivateUser(c echo.Context) error {
+	var p ActivatePayload
+	if err := c.Bind(&p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	if p.Token == "" || p.Password == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "token and password are required"})
+	}
+
+	hash, err := auth.HashPassword(p.Password)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	user, err := h.db.AcceptInvitation(p.Token, hash)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	// Generate immediate authentication token to log them in automatically
+	token, err := auth.GenerateToken(user)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate JWT session"})
+	}
+
+	h.sqliteDB.Log(user.TenantID, user.ID, "ActivateUser_Success", fmt.Sprintf("Teammate %s activated their workspace account", user.Email))
+
+	// Send Login confirmation too
+	_ = h.emailSvc.SendLoginConfirmation(user.Email, user.Name, time.Now().Format(time.RFC1123), user.Region)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"token":     token,
+		"user_id":   user.ID,
+		"tenant_id": user.TenantID,
+		"name":      user.Name,
+		"email":     user.Email,
+		"role_name": user.RoleName,
+		"region":    user.Region,
+	})
+}
+
+// UpdateUserManager updates the hierarchy reporting relationship
+func (h *UIHandler) UpdateUserManager(c echo.Context) error {
+	var p UpdateManagerPayload
+	if err := c.Bind(&p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if p.UserID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "user_id is required"})
+	}
+
+	if err := h.db.UpdateUserManager(p.UserID, p.ManagerID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	operatorID, _ := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, operatorID, "UpdateUserManager_Success", fmt.Sprintf("Reporting manager of user %s set to %s", p.UserID, p.ManagerID))
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Reporting relationship updated successfully"})
+}
+
+// UpdateUserRole updates the teammate role assignment
+func (h *UIHandler) UpdateUserRole(c echo.Context) error {
+	var p UpdateUserRolePayload // using the corrected struct name
+	if err := c.Bind(&p); err != nil {
+		// Try using payload name
+		var p2 UpdateRolePayload
+		if err2 := c.Bind(&p2); err2 == nil && p2.UserID != "" {
+			p.UserID = p2.UserID
+			p.RoleName = p2.RoleName
+		} else {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+	}
+
+	if p.UserID == "" || p.RoleName == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "user_id and role_name are required"})
+	}
+
+	if err := h.db.UpdateUserRole(p.UserID, p.RoleName); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	operatorID, _ := c.Get(middleware.ContextUserID).(string)
+	h.sqliteDB.Log(tenantID, operatorID, "UpdateUserRole_Success", fmt.Sprintf("Role of user %s updated to %s", p.UserID, p.RoleName))
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Role assigned successfully"})
+}
+
+// ServeActivationPage returns the Tailwind-styled activation page
+func (h *UIHandler) ServeActivationPage(c echo.Context) error {
+	return c.HTML(http.StatusOK, activationHtmlContent)
 }
 
 // GetState returns current in-memory DB state for UI rendering, scoped to
@@ -608,32 +802,91 @@ const htmlContent = `
                     </div>
                 </div>
 
-                <!-- Module F: User Directory View -->
+                <!-- Module F: User Directory & Visual Team Hierarchy -->
                 <div id="view_users" class="hidden space-y-6">
-                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
-                        <div class="flex justify-between items-center mb-4">
-                            <h3 class="font-bold text-lg flex items-center space-x-2 text-indigo-400">
-                                <i class="fa-solid fa-user-gear"></i>
-                                <span>User Directory & Credentials Lifecycle</span>
-                            </h3>
-                            <span class="text-xs text-slate-400 uppercase">ENTERPRISE ACCOUNTS</span>
+                    <!-- Tab Headers -->
+                    <div class="flex border-b border-brand-600 gap-4 mb-4">
+                        <button id="usersTab_directory" onclick="switchUsersTab('directory')" class="text-sm font-bold text-emerald-400 border-b-2 border-emerald-400 pb-2 flex items-center gap-2">
+                            <i class="fa-solid fa-users"></i>
+                            <span>Personnel Directory & Invitations</span>
+                        </button>
+                        <button id="usersTab_tree" onclick="switchUsersTab('tree')" class="text-sm font-bold text-slate-400 hover:text-slate-200 pb-2 flex items-center gap-2">
+                            <i class="fa-solid fa-sitemap"></i>
+                            <span>Visual Team Tree Hierarchy</span>
+                        </button>
+                    </div>
+
+                    <!-- Directory Panel -->
+                    <div id="usersPanel_directory" class="space-y-6">
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
+                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+                                <div>
+                                    <h3 class="font-bold text-lg flex items-center space-x-2 text-indigo-400">
+                                        <i class="fa-solid fa-user-gear"></i>
+                                        <span>User Directory &amp; Role Management</span>
+                                    </h3>
+                                    <p class="text-xs text-slate-300 mt-1">Manage active workspace teammate accounts, roles, and credential lifecycles</p>
+                                </div>
+                                <button onclick="openInviteModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2.5 px-4 rounded-lg transition duration-200 flex items-center gap-2">
+                                    <i class="fa-solid fa-user-plus"></i>
+                                    <span>Invite Workspace Teammate</span>
+                                </button>
+                            </div>
+
+                            <div class="overflow-x-auto w-full max-w-full block">
+                                <table class="w-full text-left text-sm min-w-[600px]">
+                                    <thead>
+                                        <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
+                                            <th class="py-3 px-4">User ID</th>
+                                            <th class="py-3 px-4">Full Name</th>
+                                            <th class="py-3 px-4">Assigned Role</th>
+                                            <th class="py-3 px-4">Working Region</th>
+                                            <th class="py-3 px-4 text-right">Credential Management</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="usersTableBody" class="divide-y divide-brand-600">
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
 
-                        <div class="overflow-x-auto w-full max-w-full block">
-                            <table class="w-full text-left text-sm min-w-[600px]">
-                                <thead>
-                                    <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
-                                        <th class="py-3 px-4">User ID</th>
-                                        <th class="py-3 px-4">Tenant</th>
-                                        <th class="py-3 px-4">Full Name</th>
-                                        <th class="py-3 px-4">Assigned Role</th>
-                                        <th class="py-3 px-4">Working Region</th>
-                                        <th class="py-3 px-4 text-right">Credential Management</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="usersTableBody" class="divide-y divide-brand-600">
-                                </tbody>
-                            </table>
+                        <!-- Active/Pending invitations -->
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
+                            <h3 class="font-bold text-sm uppercase text-slate-400 mb-3 flex items-center gap-2">
+                                <i class="fa-solid fa-paper-plane text-emerald-400"></i>
+                                <span>Pending Workspace Invitations</span>
+                            </h3>
+                            <div class="overflow-x-auto w-full max-w-full block">
+                                <table class="w-full text-left text-xs min-w-[600px]">
+                                    <thead>
+                                        <tr class="border-b border-brand-600 text-slate-400 font-semibold uppercase">
+                                            <th class="py-2 px-3">Email Address</th>
+                                            <th class="py-2 px-3">Full Name</th>
+                                            <th class="py-2 px-3">Assigned Role</th>
+                                            <th class="py-2 px-3">Working Region</th>
+                                            <th class="py-2 px-3">Status</th>
+                                            <th class="py-2 px-3 text-right">Activation Link</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="invitationsTableBody" class="divide-y divide-brand-600 font-mono text-[11px] text-slate-300">
+                                        <tr><td colspan="6" class="p-3 text-slate-500 italic text-center">No pending invitations found.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Visual Hierarchy tree panel -->
+                    <div id="usersPanel_tree" class="hidden space-y-4">
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
+                            <h3 class="font-bold text-lg flex items-center space-x-2 text-emerald-400 mb-2">
+                                <i class="fa-solid fa-network-wired"></i>
+                                <span>Teammate Reporting Lines &amp; Organogram</span>
+                            </h3>
+                            <p class="text-xs text-slate-300 mb-6">Build the workspace reporting tree hierarchy. Superior roles can edit and supervise subordinate tasks/timesheets. Update reporting lines below by changing the dropdowns.</p>
+                            <div id="orgTreeContainer" class="space-y-4 overflow-x-auto p-4 bg-brand-900/40 rounded-xl border border-brand-600/50">
+                                <!-- Tree rendered recursively -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -707,6 +960,87 @@ const htmlContent = `
                     Create Account
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- INVITE MEMBER MODAL -->
+    <div id="inviteModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
+        <div class="bg-brand-500 rounded-2xl border border-brand-600 p-6 max-w-lg w-full space-y-4">
+            <div class="flex justify-between items-center border-b border-brand-600 pb-2">
+                <h4 class="font-bold text-md text-emerald-300 flex items-center gap-2">
+                    <i class="fa-solid fa-envelope-open-text"></i>
+                    <span>Invite Teammate to Workspace</span>
+                </h4>
+                <button onclick="closeInviteModal()" class="text-slate-400 hover:text-slate-200"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <form id="inviteForm" onsubmit="handleSendInvitation(event)" class="space-y-4 text-xs">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1">Full Name</label>
+                        <input type="text" id="inviteName" placeholder="Jordan Smith" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1">Professional Email</label>
+                        <input type="email" id="inviteEmail" placeholder="j.smith@nexus-crm.io" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1">Working Region</label>
+                        <input type="text" id="inviteRegion" placeholder="Nairobi" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1">Assign Reporting Manager</label>
+                        <select id="inviteManager" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                            <option value="">No Reporting Manager</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">Role Assignment</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex items-center gap-2 p-2 border border-brand-600 rounded bg-brand-900/40 cursor-pointer hover:bg-brand-600/30">
+                            <input type="radio" name="inviteRole" value="field_technician" checked>
+                            <div>
+                                <p class="font-bold text-white">Technician</p>
+                                <p class="text-[9px] text-slate-400">Field work & timesheets</p>
+                            </div>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 border border-brand-600 rounded bg-brand-900/40 cursor-pointer hover:bg-brand-600/30">
+                            <input type="radio" name="inviteRole" value="manager">
+                            <div>
+                                <p class="font-bold text-white">Manager</p>
+                                <p class="text-[9px] text-slate-400">Approvals & team building</p>
+                            </div>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 border border-brand-600 rounded bg-brand-900/40 cursor-pointer hover:bg-brand-600/30">
+                            <input type="radio" name="inviteRole" value="finance_officer">
+                            <div>
+                                <p class="font-bold text-white">Finance</p>
+                                <p class="text-[9px] text-slate-400">Ledger & micro-payments</p>
+                            </div>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 border border-brand-600 rounded bg-brand-900/40 cursor-pointer hover:bg-brand-600/30">
+                            <input type="radio" name="inviteRole" value="tenant_admin">
+                            <div>
+                                <p class="font-bold text-white">Admin</p>
+                                <p class="text-[9px] text-slate-400">Full system override</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="pt-2 border-t border-brand-600 flex justify-end gap-2">
+                    <button type="button" onclick="closeInviteModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 font-bold px-4 py-2 rounded">Cancel</button>
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded flex items-center gap-2">
+                        <span>Send Invitation</span>
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -1425,21 +1759,73 @@ const htmlContent = `
             const usersBody = document.getElementById('usersTableBody');
             if (usersBody) {
                 usersBody.innerHTML = '';
-                Object.values(currentState.users || {}).forEach(u => {
+                const allUsers = Object.values(currentState.users || {}).filter(u => u.tenant_id === activeTenant);
+                allUsers.forEach(u => {
                     const tr = document.createElement('tr');
                     tr.className = 'hover:bg-brand-600 transition';
 
                     const actionBtn = '<button onclick="openPasswordResetModal(\'' + u.id + '\')" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-2 py-1.5 rounded border border-brand-600"><i class="fa-solid fa-key text-amber-400 mr-1"></i>Reset Password</button>';
 
-                    tr.innerHTML = '<td class="py-3 px-4 font-bold">' + u.id + '</td>' +
-                        '<td class="py-3 px-4 font-mono">' + u.tenant_id + '</td>' +
-                        '<td class="py-3 px-4 text-slate-300">' + u.name + '</td>' +
-                        '<td class="py-3 px-4"><span class="px-2 py-1 bg-brand-900 border border-brand-600 rounded text-xs">' + u.role_name + '</span></td>' +
+                    // Manager info
+                    let managerName = 'None';
+                    if (u.manager_id) {
+                        const mUser = currentState.users[u.manager_id];
+                        if (mUser) {
+                            managerName = mUser.name;
+                        }
+                    }
+
+                    // Role assignment select dropdown
+                    let roleSelect = '<select onchange="updateTeammateRole(\'' + u.id + '\', this.value)" class="bg-brand-900 border border-brand-600 rounded text-xs px-2 py-1 text-slate-200 focus:outline-none">';
+                    ['field_technician', 'manager', 'finance_officer', 'tenant_admin'].forEach(r => {
+                        const isSelected = r === u.role_name ? 'selected' : '';
+                        roleSelect += '<option value="' + r + '" ' + isSelected + '>' + r + '</option>';
+                    });
+                    roleSelect += '</select>';
+
+                    tr.innerHTML = '<td class="py-3 px-4 font-bold font-mono">' + u.id + '</td>' +
+                        '<td class="py-3 px-4 text-slate-300">' +
+                            '<div class="font-bold">' + u.name + '</div>' +
+                            '<div class="text-[10px] text-slate-400">' + u.email + '</div>' +
+                            '<div class="text-[10px] text-emerald-400 mt-0.5"><i class="fa-solid fa-arrow-turn-up text-[8px] mr-1"></i>Manager: ' + managerName + '</div>' +
+                        '</td>' +
+                        '<td class="py-3 px-4">' + roleSelect + '</td>' +
                         '<td class="py-3 px-4 text-slate-400">' + u.region + '</td>' +
                         '<td class="py-3 px-4 text-right">' + actionBtn + '</td>';
                     usersBody.appendChild(tr);
                 });
             }
+
+            // Render Pending invitations
+            const inviteTableBody = document.getElementById('invitationsTableBody');
+            if (inviteTableBody) {
+                inviteTableBody.innerHTML = '';
+                const activeInvitations = Object.values(currentState.invitations || {}).filter(inv => inv.tenant_id === activeTenant);
+                if (activeInvitations.length === 0) {
+                    inviteTableBody.innerHTML = '<tr><td colspan="6" class="p-3 text-slate-500 italic text-center">No pending invitations found.</td></tr>';
+                } else {
+                    activeInvitations.forEach(inv => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-brand-600 transition';
+
+                        const statusColor = inv.status === 'Pending' ? 'text-amber-400' : 'text-emerald-400';
+                        const activationUrl = window.location.origin + '/activate.html?token=' + inv.token + '&tenant_id=' + inv.tenant_id + '&role_assignment_id=' + inv.role_name;
+
+                        tr.innerHTML = '<td class="py-2 px-3">' + inv.email + '</td>' +
+                            '<td class="py-2 px-3 font-semibold text-white">' + inv.name + '</td>' +
+                            '<td class="py-2 px-3"><span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[10px]">' + inv.role_name + '</span></td>' +
+                            '<td class="py-2 px-3">' + inv.region + '</td>' +
+                            '<td class="py-2 px-3 ' + statusColor + '">' + inv.status + '</td>' +
+                            '<td class="py-2 px-3 text-right">' +
+                                '<button onclick="navigator.clipboard.writeText(\'' + activationUrl + '\'); alert(\'Copied activation link!\')" class="text-[10px] bg-brand-900 text-emerald-400 hover:bg-brand-600 border border-brand-600 rounded py-1 px-2 font-bold transition">Copy Link</button>' +
+                            '</td>';
+                        inviteTableBody.appendChild(tr);
+                    });
+                }
+            }
+
+            // Render Visual Tree Organogram
+            renderOrgTree();
         }
 
         async function createInventoryItem(e) {
@@ -1689,12 +2075,368 @@ const htmlContent = `
             fetchState();
         }
 
+        function switchUsersTab(tab) {
+            const directoryBtn = document.getElementById('usersTab_directory');
+            const treeBtn = document.getElementById('usersTab_tree');
+            const directoryPanel = document.getElementById('usersPanel_directory');
+            const treePanel = document.getElementById('usersPanel_tree');
+
+            if (tab === 'directory') {
+                directoryBtn.className = 'text-sm font-bold text-emerald-400 border-b-2 border-emerald-400 pb-2 flex items-center gap-2';
+                treeBtn.className = 'text-sm font-bold text-slate-400 hover:text-slate-200 pb-2 flex items-center gap-2';
+                directoryPanel.classList.remove('hidden');
+                treePanel.classList.add('hidden');
+            } else {
+                treeBtn.className = 'text-sm font-bold text-emerald-400 border-b-2 border-emerald-400 pb-2 flex items-center gap-2';
+                directoryBtn.className = 'text-sm font-bold text-slate-400 hover:text-slate-200 pb-2 flex items-center gap-2';
+                treePanel.classList.remove('hidden');
+                directoryPanel.classList.add('hidden');
+                renderOrgTree();
+            }
+        }
+
+        function openInviteModal() {
+            const select = document.getElementById('inviteManager');
+            select.innerHTML = '<option value="">No Reporting Manager (Root)</option>';
+            const activeTenant = currentUser.tenant_id;
+
+            Object.values(currentState.users || {}).forEach(u => {
+                if (u.tenant_id === activeTenant && (u.role_name === 'manager' || u.role_name === 'tenant_admin')) {
+                    const opt = document.createElement('option');
+                    opt.value = u.id;
+                    opt.textContent = u.name + ' (' + u.role_name + ')';
+                    select.appendChild(opt);
+                }
+            });
+            document.getElementById('inviteModal').classList.remove('hidden');
+        }
+
+        function closeInviteModal() {
+            document.getElementById('inviteModal').classList.add('hidden');
+            document.getElementById('inviteForm').reset();
+        }
+
+        async function handleSendInvitation(e) {
+            e.preventDefault();
+            const name = document.getElementById('inviteName').value;
+            const email = document.getElementById('inviteEmail').value;
+            const region = document.getElementById('inviteRegion').value;
+            const manager_id = document.getElementById('inviteManager').value;
+            const role_name = document.querySelector('input[name="inviteRole"]:checked').value;
+
+            try {
+                const res = await fetch('/api/users/invite', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ name, email, region, manager_id, role_name })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('INVITATION_SENT', 'Teammate workspace invitation dispatched for ' + email);
+                    closeInviteModal();
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function updateTeammateManager(userId, managerId) {
+            try {
+                const res = await fetch('/api/users/update-manager', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ user_id: userId, manager_id: managerId })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('HIERARCHY_MUTATED', 'Teammate reporting relationship updated.');
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function updateTeammateRole(userId, roleName) {
+            try {
+                const res = await fetch('/api/users/update-role', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ user_id: userId, role_name: roleName })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('ROLE_ASSIGNMENT_MUTATED', 'Teammate role assignment updated.');
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function renderOrgTree() {
+            const activeTenant = currentUser.tenant_id;
+            const allUsers = Object.values(currentState.users || {}).filter(u => u.tenant_id === activeTenant);
+
+            // Group users by manager_id
+            const usersByManager = {};
+            const rootUsers = [];
+
+            allUsers.forEach(u => {
+                if (!u.manager_id) {
+                    rootUsers.push(u);
+                } else {
+                    if (!usersByManager[u.manager_id]) {
+                        usersByManager[u.manager_id] = [];
+                    }
+                    usersByManager[u.manager_id].push(u);
+                }
+            });
+
+            // Recursively build tree nodes HTML
+            function buildNodeHtml(user, level = 0) {
+                const reports = usersByManager[user.id] || [];
+                const paddingLeft = level * 24;
+
+                let selectManagerOptions = '<option value="">No Manager (Root)</option>';
+                allUsers.forEach(otherUser => {
+                    if (otherUser.id !== user.id) {
+                        const isSelected = otherUser.id === user.manager_id ? 'selected' : '';
+                        selectManagerOptions += '<option value="' + otherUser.id + '" ' + isSelected + '>' + otherUser.name + ' (' + otherUser.role_name + ')</option>';
+                    }
+                });
+
+                let selectRoleOptions = '';
+                ['field_technician', 'manager', 'finance_officer', 'tenant_admin'].forEach(r => {
+                    const isSelected = r === user.role_name ? 'selected' : '';
+                    selectRoleOptions += '<option value="' + r + '" ' + isSelected + '>' + r + '</option>';
+                });
+
+                let nodeHtml = '<div class="flex flex-col space-y-2 border-l-2 border-emerald-500/30 pl-4 py-2 ml-4">' +
+                    '<div class="bg-brand-500 p-4 rounded-xl border border-brand-600 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4 max-w-xl">' +
+                        '<div class="flex items-center space-x-3">' +
+                            '<div class="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold">' +
+                                user.name.charAt(0) +
+                            '</div>' +
+                            '<div>' +
+                                '<h4 class="font-bold text-sm text-white">' + user.name + '</h4>' +
+                                '<p class="text-[10px] text-slate-400">' + user.email + '</p>' +
+                                '<p class="text-[10px] text-emerald-400 font-mono mt-0.5">' + user.region + '</p>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="flex flex-col sm:flex-row gap-2">' +
+                            '<div>' +
+                                '<label class="block text-[8px] uppercase tracking-wider text-slate-400 mb-0.5">Manager</label>' +
+                                '<select onchange="updateTeammateManager(\'' + user.id + '\', this.value)" class="bg-brand-900 border border-brand-600 rounded text-[10px] px-2 py-1 text-slate-200 focus:outline-none w-full sm:w-36">' +
+                                    selectManagerOptions +
+                                '</select>' +
+                            '</div>' +
+                            '<div>' +
+                                '<label class="block text-[8px] uppercase tracking-wider text-slate-400 mb-0.5">Role</label>' +
+                                '<select onchange="updateTeammateRole(\'' + user.id + '\', this.value)" class="bg-brand-900 border border-brand-600 rounded text-[10px] px-2 py-1 text-slate-200 focus:outline-none w-full sm:w-32">' +
+                                    selectRoleOptions +
+                                '</select>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+
+                if (reports.length > 0) {
+                    nodeHtml += '<div class="space-y-2 mt-2">';
+                    reports.forEach(child => {
+                        nodeHtml += buildNodeHtml(child, level + 1);
+                    });
+                    nodeHtml += '</div>';
+                }
+
+                nodeHtml += '</div>';
+                return nodeHtml;
+            }
+
+            const container = document.getElementById('orgTreeContainer');
+            if (container) {
+                container.innerHTML = '';
+
+                if (rootUsers.length === 0 && allUsers.length > 0) {
+                    // If there's a loop or somehow no root, fallback to first user as root
+                    rootUsers.push(allUsers[0]);
+                }
+
+                if (allUsers.length === 0) {
+                    container.innerHTML = '<div class="text-slate-400 italic">No workspace teammates available to build structure.</div>';
+                    return;
+                }
+
+                rootUsers.forEach(root => {
+                    container.innerHTML += buildNodeHtml(root);
+                });
+            }
+        }
+
         setInterval(() => {
             fetchState();
             fetchLogs();
         }, 5000);
 
         initAuth();
+    </script>
+</body>
+</html>
+`
+
+const activationHtmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SME Kenya ERP - Activate Account</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f5f7f6',
+                            100: '#e1e7e4',
+                            500: '#2f4f4f',
+                            600: '#243e3e',
+                            900: '#142222',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-brand-900 text-slate-100 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-md w-full bg-brand-500 rounded-2xl border border-brand-600 p-6 md:p-8 shadow-2xl space-y-6">
+        <div class="text-center space-y-2">
+            <i class="fa-solid fa-user-shield text-emerald-400 text-5xl"></i>
+            <h2 class="text-2xl font-bold tracking-wide text-white">Activate ERP Account</h2>
+            <p class="text-sm text-slate-300">Set up your password to complete registration</p>
+        </div>
+
+        <!-- Preview Card -->
+        <div id="previewCard" class="bg-brand-900/60 p-4 rounded-xl border border-brand-600 space-y-2 text-sm">
+            <div class="flex justify-between border-b border-brand-600/50 pb-2">
+                <span class="text-slate-400">Teammate:</span>
+                <span id="previewName" class="font-bold text-white">Loading...</span>
+            </div>
+            <div class="flex justify-between border-b border-brand-600/50 pb-2">
+                <span class="text-slate-400">Workspace Tenant:</span>
+                <span id="previewTenant" class="font-bold text-emerald-400">Loading...</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-slate-400">Assigned Role:</span>
+                <span id="previewRole" class="font-bold text-amber-400 bg-brand-500 px-1.5 py-0.5 rounded text-xs font-mono">Loading...</span>
+            </div>
+        </div>
+
+        <form onsubmit="handleActivation(event)" class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-slate-400 mb-1">Choose Password (min. 8 chars)</label>
+                <input type="password" id="actPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-400 mb-1">Confirm Password</label>
+                <input type="password" id="actConfirmPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+            </div>
+            <div id="errorMsg" class="hidden text-xs text-rose-400 font-semibold"></div>
+            <div id="successMsg" class="hidden text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                <i class="fa-solid fa-circle-check animate-bounce"></i>
+                <span>Account activated! Redirecting to workspace...</span>
+            </div>
+
+            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition duration-200 shadow-md">
+                Activate &amp; Enter Workspace
+            </button>
+        </form>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        const urlTenant = params.get('tenant_id');
+        const urlRole = params.get('role_assignment_id');
+
+        async function loadInvitationPreview() {
+            if (!token) {
+                showError("No activation token provided. Please check your invitation email.");
+                return;
+            }
+
+            // Fill standard values from URL as quick fallback
+            document.getElementById('previewTenant').textContent = urlTenant || "SME Tenant";
+            document.getElementById('previewRole').textContent = urlRole || "field_technician";
+
+            try {
+                const res = await fetch('/api/invite/preview?token=' + encodeURIComponent(token));
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('previewName').textContent = data.name;
+                    document.getElementById('previewTenant').textContent = data.tenant_id;
+                    document.getElementById('previewRole').textContent = data.role_name;
+                } else {
+                    document.getElementById('previewName').textContent = "Invited Colleague";
+                }
+            } catch (err) {
+                document.getElementById('previewName').textContent = "Invited Colleague";
+            }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+        }
+
+        async function handleActivation(e) {
+            e.preventDefault();
+            document.getElementById('errorMsg').classList.add('hidden');
+            document.getElementById('successMsg').classList.add('hidden');
+
+            const password = document.getElementById('actPassword').value;
+            const confirm = document.getElementById('actConfirmPassword').value;
+
+            if (password !== confirm) {
+                showError("Passwords do not match!");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/activate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token, password })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showError(data.error || "Activation failed. The token may have expired or already been accepted.");
+                    return;
+                }
+
+                // Store session token and redirect immediately to home dashboard
+                sessionStorage.setItem('erp_token', data.token);
+                document.getElementById('successMsg').classList.remove('hidden');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1500);
+
+            } catch (err) {
+                showError("Network error. Please try again.");
+            }
+        }
+
+        loadInvitationPreview();
     </script>
 </body>
 </html>

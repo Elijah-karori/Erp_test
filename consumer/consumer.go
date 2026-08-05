@@ -12,11 +12,12 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"erp-event-bus/db"
+	"erp-event-bus/email"
 	"erp-event-bus/types"
 )
 
 // StartERPProcessors launches the multi-tenant, hierarchy, and ABAC checking consumers
-func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Database, sdb *db.SQLiteDB) error {
+func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Database, sdb *db.SQLiteDB, emailSvc *email.EmailService) error {
 	js, err := jetstream.New(nc)
 	if err != nil {
 		return err
@@ -41,7 +42,7 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	// 3. TASKS Consumer: Technician timesheets with hierarchical approvals
 	taskCons, err := js.Consumer(ctx, "TASKS", "TaskTimesheetWorker")
 	if err == nil {
-		go consumeTasks(taskCons, js, database, sdb, nc)
+		go consumeTasks(taskCons, js, database, sdb, nc, emailSvc)
 	} else {
 		log.Printf("Warning: Tasks consumer binding skipped: %v", err)
 	}
@@ -241,7 +242,7 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 }
 
 // consumeTasks resolves timesheet submissions based on user/role superiors checks
-func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB, nc *nats.Conn) {
+func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.Database, sdb *db.SQLiteDB, nc *nats.Conn, emailSvc *email.EmailService) {
 	_, err := cons.Consume(func(msg jetstream.Msg) {
 		tenantID := msg.Headers().Get(types.HeaderTenantID)
 		userID := msg.Headers().Get(types.HeaderUserID)
@@ -320,6 +321,20 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 
 			log.Printf("TASKS: Timesheet %s successfully approved by superior %s under tenant %s", ts.ID, userID, tenantID)
 			sdb.Log(tenantID, userID, "ApproveTimesheet_Success", fmt.Sprintf("Approved timesheet %s for subordinate technician %s", cmd.TimesheetID, ts.UserID))
+
+			// Trigger approval notification email
+			if emailSvc != nil {
+				techUser, errUser := database.GetUser(ts.UserID)
+				mgrUser, _ := database.GetUser(userID)
+				if errUser == nil && techUser != nil {
+					mgrName := "Manager"
+					if mgrUser != nil {
+						mgrName = mgrUser.Name
+					}
+					_ = emailSvc.SendApprovalNotification(techUser.Email, mgrName, "Timesheet", cmd.TimesheetID, "Approved")
+				}
+			}
+
 			msg.Ack()
 
 		case "erp.users.auth.cmd.reset_password":
@@ -367,6 +382,24 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			} else {
 				sdb.Log(tenantID, userID, "MaterialApproval_Fulfilled", fmt.Sprintf("Material approved and serial asset %s issued automatically", updatedReq.AllocatedSN))
 			}
+
+			// Trigger approval email for materials
+			if emailSvc != nil {
+				reqUser, errUser := database.GetUser(updatedReq.RequesterID)
+				leadUser, _ := database.GetUser(userID)
+				if errUser == nil && reqUser != nil {
+					leadName := "Team Lead"
+					if leadUser != nil {
+						leadName = leadUser.Name
+					}
+					statusStr := "Approved (Fulfilled with SN: " + updatedReq.AllocatedSN + ")"
+					if procOrder != nil {
+						statusStr = "Escalated to Procurement (Out of stock)"
+					}
+					_ = emailSvc.SendApprovalNotification(reqUser.Email, leadName, "Material Request", cmd.RequestID, statusStr)
+				}
+			}
+
 			msg.Ack()
 
 		case "erp.tasks.task.cmd.create":

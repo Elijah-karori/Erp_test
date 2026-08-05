@@ -33,6 +33,21 @@ type User struct {
 	RoleName     string `json:"role_name"`
 	Region       string `json:"region"`
 	PasswordHash string `json:"-"` // bcrypt hash, never serialized in API responses
+	ManagerID    string `json:"manager_id,omitempty"`
+}
+
+// Workspace Invitation
+type Invitation struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	RoleName  string    `json:"role_name"`
+	Region    string    `json:"region"`
+	ManagerID string    `json:"manager_id,omitempty"`
+	Token     string    `json:"token"`
+	Status    string    `json:"status"` // 'Pending', 'Accepted', 'Expired'
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Customer details

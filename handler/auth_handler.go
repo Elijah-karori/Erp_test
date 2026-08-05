@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"erp-event-bus/auth"
 	"erp-event-bus/db"
+	"erp-event-bus/email"
 	"erp-event-bus/middleware"
 )
 
@@ -20,10 +22,11 @@ import (
 type AuthHandler struct {
 	db       *db.Database
 	sqliteDB *db.SQLiteDB
+	emailSvc *email.EmailService
 }
 
-func NewAuthHandler(database *db.Database, sdb *db.SQLiteDB) *AuthHandler {
-	return &AuthHandler{db: database, sqliteDB: sdb}
+func NewAuthHandler(database *db.Database, sdb *db.SQLiteDB, emailSvc *email.EmailService) *AuthHandler {
+	return &AuthHandler{db: database, sqliteDB: sdb, emailSvc: emailSvc}
 }
 
 type RegisterPayload struct {
@@ -127,6 +130,9 @@ func (h *AuthHandler) LoginHandler(c echo.Context) error {
 	}
 
 	h.sqliteDB.Log(user.TenantID, user.ID, "Login_Success", fmt.Sprintf("User %s logged in", user.Email))
+
+	// Trigger Email Notification for login confirmation
+	_ = h.emailSvc.SendLoginConfirmation(user.Email, user.Name, time.Now().Format(time.RFC1123), user.Region)
 
 	return c.JSON(http.StatusOK, authResponse{
 		Token: token, UserID: user.ID, TenantID: user.TenantID,
