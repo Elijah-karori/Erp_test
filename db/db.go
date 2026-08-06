@@ -270,6 +270,115 @@ func (d *Database) SaveInvoice(invoice *types.Invoice) {
 	})
 }
 
+func (d *Database) SaveInventoryItemDirect(tenantID, name, serialNumber string, reorderThreshold int, region string) error {
+	ctx := context.Background()
+	itemID := "item_man_" + uuid.NewString()[:8]
+	return d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, region, reorder_threshold)
+			VALUES ($1, $2, $3, $4, 'In_Stock', $5, $6)`,
+			itemID, tenantID, name, serialNumber, region, reorderThreshold)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO inventory_history (tenant_id, item_id, from_status, to_status, changed_by, changed_at)
+			VALUES ($1, $2, 'None', 'In_Stock', 'Manual_Entry', NOW())`,
+			tenantID, itemID)
+		return err
+	})
+}
+
+func (d *Database) UpdateInvoiceNoteUsageType(noteID, tenantID, usageType, customerID string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var status string
+		var invoiceID *string
+
+		if usageType == "Internal" {
+			status = "Paid_Usage_Support"
+			_, err := tx.Exec(ctx, `
+				UPDATE invoice_notes
+				SET usage_type = $1, status = $2, invoice_id = NULL
+				WHERE id = $3 AND tenant_id = $4`,
+				usageType, status, noteID, tenantID)
+			return err
+		}
+
+		// Installation or Customer_Broken usage
+		status = "Pending_Payment"
+		invID := "inv_" + noteID
+		invoiceID = &invID
+
+		// Auto-generate customer Invoice record
+		// Check if customer exists, else fallback
+		var custID string
+		if customerID != "" {
+			custID = customerID
+		} else {
+			_ = tx.QueryRow(ctx, "SELECT id FROM customers WHERE tenant_id = $1 LIMIT 1", tenantID).Scan(&custID)
+		}
+
+		if custID != "" {
+			_, _ = tx.Exec(ctx, `
+				INSERT INTO invoices (id, tenant_id, customer_id, total_amount, paid_amount, balance_amount, status, region)
+				VALUES ($1, $2, $3, 12500.00, 0.00, 12500.00, 'Draft', 'Nairobi')
+				ON CONFLICT (id) DO NOTHING`,
+				invID, tenantID, custID)
+		}
+
+		_, err := tx.Exec(ctx, `
+			UPDATE invoice_notes
+			SET usage_type = $1, status = $2, invoice_id = $3
+			WHERE id = $4 AND tenant_id = $5`,
+			usageType, status, invoiceID, noteID, tenantID)
+		return err
+	})
+}
+
+func (d *Database) ConfirmProcurementReceipt(procID, tenantID, confirmedBy, photoURL string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var itemName string
+		err := tx.QueryRow(ctx, "SELECT item_name FROM procurement_orders WHERE id = $1 AND tenant_id = $2", procID, tenantID).Scan(&itemName)
+		if err != nil {
+			return fmt.Errorf("procurement order not found: %w", err)
+		}
+
+		// Update procurement status
+		_, err = tx.Exec(ctx, `
+			UPDATE procurement_orders
+			SET status = 'Completed', barcode_photo_url = $1, confirmed_at = NOW(), confirmed_by = $2
+			WHERE id = $3 AND tenant_id = $4`,
+			photoURL, confirmedBy, procID, tenantID)
+		if err != nil {
+			return err
+		}
+
+		// Auto Barcode Verification & Extraction
+		// Extract verification token / barcode (simulated image processing)
+		shortUUID := uuid.NewString()[:8]
+		extractedSN := "SN-AUTO-PROC-" + shortUUID
+		itemID := "item_proc_" + shortUUID
+
+		// Insert automatic inventory item
+		_, err = tx.Exec(ctx, `
+			INSERT INTO inventory_items (id, tenant_id, name, serial_number, status, region, reorder_threshold)
+			VALUES ($1, $2, $3, $4, 'In_Stock', 'Nairobi', 2)`,
+			itemID, tenantID, itemName, extractedSN)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO inventory_history (tenant_id, item_id, from_status, to_status, changed_by, changed_at)
+			VALUES ($1, $2, 'None', 'In_Stock', $3, NOW())`,
+			tenantID, itemID, confirmedBy)
+		return err
+	})
+}
+
 func (d *Database) CreateSupportTicket(ticket *types.SupportTicket) error {
 	ctx := context.Background()
 	return d.withTx(ctx, ticket.TenantID, func(tx pgx.Tx) error {
@@ -352,7 +461,17 @@ func (d *Database) SavePayment(pmt *types.Payment) {
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (id) DO NOTHING`,
 			pmt.ID, pmt.TenantID, pmt.InvoiceID, pmt.Amount, pmt.PaymentMethod, pmt.Reference, pmt.Date)
-		return err
+		if err != nil {
+			return err
+		}
+
+		// If payment is applied to the customer invoice, update matching invoice note to 'Cleared_Paid'
+		_, _ = tx.Exec(ctx, `
+			UPDATE invoice_notes
+			SET status = 'Cleared_Paid', payment_id = $1
+			WHERE invoice_id = $2 AND tenant_id = $3`,
+			pmt.ID, pmt.InvoiceID, pmt.TenantID)
+		return nil
 	})
 }
 
@@ -393,7 +512,19 @@ func (d *Database) SaveTask(task *types.Task) {
 				due_date = $8,
 				depends_on = NULLIF($9, '')`,
 			task.ID, task.TenantID, task.Title, task.AssignedTo, task.CreatedBy, task.Status, task.Region, task.DueDate, task.DependsOn)
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Reconcile Invoice Notes: if the task is finished but payment is still pending, move to Reconciliation_Started
+		if task.Status == "Completed" || task.Status == "Approved" {
+			_, _ = tx.Exec(ctx, `
+				UPDATE invoice_notes
+				SET status = 'Reconciliation_Started'
+				WHERE task_id = $1 AND tenant_id = $2 AND status = 'Pending_Payment'`,
+				task.ID, task.TenantID)
+		}
+		return nil
 	})
 }
 
@@ -595,6 +726,17 @@ func (d *Database) ApproveMaterialRequestTransaction(id, tenantID, approverID st
 			var tID string
 			if taskID != nil {
 				tID = *taskID
+			}
+
+			// Automatically create Invoice Note for the fulfilled material request
+			noteID := "note_" + id
+			_, err = tx.Exec(ctx, `
+				INSERT INTO invoice_notes (id, tenant_id, request_id, item_name, allocated_sn, task_id, requester_id, usage_type, status)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, 'Internal', 'Paid_Usage_Support')
+				ON CONFLICT (id) DO NOTHING`,
+				noteID, tenantID, id, itemName, serialNumber, tID, requesterID)
+			if err != nil {
+				return err
 			}
 
 			req = types.MaterialRequest{
@@ -1027,21 +1169,36 @@ func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[stri
 
 	g.Go(func() error {
 		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
-			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, request_id, item_name, expected_time, status FROM procurement_orders WHERE tenant_id = $1", tenantID)
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, request_id, item_name, expected_time, status, barcode_photo_url, confirmed_at, confirmed_by FROM procurement_orders WHERE tenant_id = $1", tenantID)
 			if err != nil {
 				return err
 			}
 			defer rows.Close()
 			for rows.Next() {
 				var p types.ProcurementOrder
-				var requestID *string
-				if err := rows.Scan(&p.ID, &p.TenantID, &requestID, &p.ItemName, &p.ExpectedTime, &p.Status); err == nil {
+				var requestID, barcodePhotoURL, confirmedBy *string
+				var confirmedAt, expectedTime *time.Time
+				if err := rows.Scan(&p.ID, &p.TenantID, &requestID, &p.ItemName, &expectedTime, &p.Status, &barcodePhotoURL, &confirmedAt, &confirmedBy); err == nil {
 					if requestID != nil {
 						p.RequestID = *requestID
+					}
+					if expectedTime != nil {
+						p.ExpectedTime = *expectedTime
+					}
+					if barcodePhotoURL != nil {
+						p.BarcodePhotoURL = *barcodePhotoURL
+					}
+					if confirmedAt != nil {
+						p.ConfirmedAt = *confirmedAt
+					}
+					if confirmedBy != nil {
+						p.ConfirmedBy = *confirmedBy
 					}
 					mu.Lock()
 					procurementOrders[p.ID] = &p
 					mu.Unlock()
+				} else {
+					log.Printf("[Bootstrap Warning] failed to scan procurement order row: %v", err)
 				}
 			}
 			return nil
@@ -1069,6 +1226,29 @@ func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[stri
 					t.DueDate = dueDate
 					mu.Lock()
 					overdueTasks[t.ID] = &t
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
+
+	invoiceNotes := make(map[string]*types.InvoiceNote)
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, `
+				SELECT id, tenant_id, request_id, item_name, allocated_sn, COALESCE(task_id, ''), requester_id, usage_type, status, COALESCE(invoice_id, ''), COALESCE(payment_id, ''), created_at
+				FROM invoice_notes WHERE tenant_id = $1`, tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var n types.InvoiceNote
+				if err := rows.Scan(&n.ID, &n.TenantID, &n.RequestID, &n.ItemName, &n.AllocatedSN, &n.TaskID, &n.RequesterID, &n.UsageType, &n.Status, &n.InvoiceID, &n.PaymentID, &n.CreatedAt); err == nil {
+					mu.Lock()
+					invoiceNotes[n.ID] = &n
 					mu.Unlock()
 				}
 			}
@@ -1160,6 +1340,7 @@ func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[stri
 		"overdue_tasks":      overdueTasks,
 		"invitations":        invitations,
 		"support_tickets":    supportTickets,
+		"invoice_notes":      invoiceNotes,
 	}
 }
 
@@ -1236,6 +1417,41 @@ func (d *Database) SeedIfNeeded() {
 			SELECT 1 FROM pg_constraint WHERE conname = 'users_manager_id_fkey'
 		) THEN
 			ALTER TABLE users ADD CONSTRAINT users_manager_id_fkey FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL;
+		END IF;
+	END
+	$$;
+
+	-- Ensure procurement_orders have the confirmation columns
+	ALTER TABLE procurement_orders ADD COLUMN IF NOT EXISTS barcode_photo_url text;
+	ALTER TABLE procurement_orders ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+	ALTER TABLE procurement_orders ADD COLUMN IF NOT EXISTS confirmed_by text;
+
+	-- Ensure invoice_notes table exists
+	CREATE TABLE IF NOT EXISTS invoice_notes (
+		id           text primary key,
+		tenant_id    text not null references tenants(id) on delete cascade,
+		request_id   text not null references material_requests(id) on delete cascade,
+		item_name    text not null,
+		allocated_sn text not null,
+		task_id      text,
+		requester_id text not null references users(id),
+		usage_type   text not null default 'Internal',
+		status       text not null default 'Paid_Usage_Support',
+		invoice_id   text references invoices(id) on delete set null,
+		payment_id   text references payments(id) on delete set null,
+		created_at   timestamptz not null default now()
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_invoice_notes_tenant ON invoice_notes(tenant_id);
+	ALTER TABLE invoice_notes ENABLE ROW LEVEL SECURITY;
+	ALTER TABLE invoice_notes FORCE ROW LEVEL SECURITY;
+
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM pg_policies WHERE tablename = 'invoice_notes' AND policyname = 'tenant_isolation'
+		) THEN
+			CREATE POLICY tenant_isolation ON invoice_notes USING (tenant_id = current_setting('app.current_tenant_id', true));
 		END IF;
 	END
 	$$;

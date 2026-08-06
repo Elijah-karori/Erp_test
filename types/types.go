@@ -76,12 +76,31 @@ type MaterialRequest struct {
 
 // Procurement backup order
 type ProcurementOrder struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	RequestID    string    `json:"request_id"`
-	ItemName     string    `json:"item_name"`
-	ExpectedTime time.Time `json:"expected_time"`
-	Status       string    `json:"status"` // e.g. "Bidding", "Completed"
+	ID              string    `json:"id"`
+	TenantID        string    `json:"tenant_id"`
+	RequestID       string    `json:"request_id"`
+	ItemName        string    `json:"item_name"`
+	ExpectedTime    time.Time `json:"expected_time"`
+	Status          string    `json:"status"` // e.g. "Bidding", "Completed"
+	BarcodePhotoURL string    `json:"barcode_photo_url,omitempty"`
+	ConfirmedAt     time.Time `json:"confirmed_at,omitempty"`
+	ConfirmedBy     string    `json:"confirmed_by,omitempty"`
+}
+
+// Invoice Note for serialized item dispatches
+type InvoiceNote struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	RequestID   string    `json:"request_id"`
+	ItemName    string    `json:"item_name"`
+	AllocatedSN string    `json:"allocated_sn"`
+	TaskID      string    `json:"task_id"`
+	RequesterID string    `json:"requester_id"`
+	UsageType   string    `json:"usage_type"` // 'Internal', 'Customer_Installation', 'Customer_Broken'
+	Status      string    `json:"status"`     // 'Paid_Usage_Support', 'Pending_Payment', 'Cleared_Paid', 'Reconciliation_Started'
+	InvoiceID   string    `json:"invoice_id,omitempty"`
+	PaymentID   string    `json:"payment_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // Inventory item with serial number tracking

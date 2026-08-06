@@ -38,7 +38,7 @@ func cleanAndSeedDB(t *testing.T) *db.Database {
 	tables := []string{
 		"timesheets", "tasks", "payments", "invoices", "procurement_orders",
 		"material_requests", "inventory_history", "inventory_items", "users", "roles", "tenants", "erp_logs",
-		"invitations", "customers", "support_tickets",
+		"invitations", "customers", "support_tickets", "invoice_notes",
 	}
 	for _, table := range tables {
 		_, _ = pool.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table))
@@ -438,4 +438,136 @@ func TestSupportTicketsAndTasks(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Converted", retrieved.Status)
 	assert.Equal(t, taskID, retrieved.TaskID)
+}
+
+func TestSerializedAssetWorkflows(t *testing.T) {
+	database := cleanAndSeedDB(t)
+	defer database.Pool.Close()
+
+	ctx := context.Background()
+
+	// Seed customer for invoice creation
+	_, _ = database.Pool.Exec(ctx, "INSERT INTO customers (id, tenant_id, name, phone, email, dispatch_status) VALUES ('cust_test_billing', 'tenant_safari', 'Billing Client', '254711223344', 'bill@saf.test', 'Pending')")
+
+	// 1. Direct Manual Inventory Item Insertion
+	err := database.SaveInventoryItemDirect("tenant_safari", "Standard Power Adapter", "SN-MAN-PWR-111", 5, "Nairobi")
+	assert.NoError(t, err)
+
+	// Verify stock item exists
+	var itemExists bool
+	_ = database.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM inventory_items WHERE serial_number = 'SN-MAN-PWR-111' AND tenant_id = 'tenant_safari')").Scan(&itemExists)
+	assert.True(t, itemExists)
+
+	// 2. Auto-Invoice Note Creation upon Material Request Approval
+	// Seed a task first
+	dueDate := time.Now().Add(48 * time.Hour)
+	task := &types.Task{
+		ID:         "task_billing_1",
+		TenantID:   "tenant_safari",
+		Title:      "FTTB Fiber Install",
+		CreatedBy:  "usr_safari_admin",
+		Status:     "In_Progress",
+		Region:     "Nairobi",
+		DueDate:    &dueDate,
+	}
+	database.SaveTask(task)
+
+	// Seed a material request for task_billing_1
+	database.CreateMaterialRequestTransaction("req_billing_1", "tenant_safari", "task_billing_1", "usr_safari_tech", "Huawei GPON ONU")
+
+	// Approve it (will assign item_onu_1 to it and fulfill)
+	_, _, err = database.ApproveMaterialRequestTransaction("req_billing_1", "tenant_safari", "usr_safari_admin")
+	assert.NoError(t, err)
+
+	// Verify matching Invoice Note is auto-created with status Paid_Usage_Support (Internal usage by default)
+	var usageType, noteStatus string
+	err = database.Pool.QueryRow(ctx, "SELECT usage_type, status FROM invoice_notes WHERE id = 'note_req_billing_1'").Scan(&usageType, &noteStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, "Internal", usageType)
+	assert.Equal(t, "Paid_Usage_Support", noteStatus)
+
+	// 3. Usage Type Transition to Customer Installation (creates draft Invoice for KSh 12,500.00)
+	err = database.UpdateInvoiceNoteUsageType("note_req_billing_1", "tenant_safari", "Customer_Installation", "cust_test_billing")
+	assert.NoError(t, err)
+
+	// Verify status became Pending_Payment
+	err = database.Pool.QueryRow(ctx, "SELECT usage_type, status FROM invoice_notes WHERE id = 'note_req_billing_1'").Scan(&usageType, &noteStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, "Customer_Installation", usageType)
+	assert.Equal(t, "Pending_Payment", noteStatus)
+
+	// Verify Draft customer Invoice is created for 12,500.00
+	var totalAmt float64
+	var invStatus string
+	err = database.Pool.QueryRow(ctx, "SELECT total_amount, status FROM invoices WHERE id = 'inv_note_req_billing_1'").Scan(&totalAmt, &invStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(12500.00), totalAmt)
+	assert.Equal(t, "Draft", invStatus)
+
+	// 4. Auto-Clearing via Payment Processing
+	pmt := &types.Payment{
+		ID:            "pay_billing_1",
+		TenantID:      "tenant_safari",
+		InvoiceID:     "inv_note_req_billing_1",
+		Amount:        12500.00,
+		PaymentMethod: "Mpesa_Paybill",
+		Reference:     "REF998877",
+		Date:          time.Now(),
+	}
+	database.SavePayment(pmt)
+
+	// Verify Invoice Note is auto resolved to Cleared_Paid
+	err = database.Pool.QueryRow(ctx, "SELECT status FROM invoice_notes WHERE id = 'note_req_billing_1'").Scan(&noteStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, "Cleared_Paid", noteStatus)
+
+	// 5. Reconciliation Started on task completion if payment pending
+	// Let's manually add another GPON ONU item to stock so the second request can be fulfilled
+	err = database.SaveInventoryItemDirect("tenant_safari", "Huawei GPON ONU", "SN-TEST-ONU-222", 1, "Nairobi")
+	assert.NoError(t, err)
+
+	// Let's create a second Material Request & Invoice Note
+	database.CreateMaterialRequestTransaction("req_billing_2", "tenant_safari", "task_billing_1", "usr_safari_tech", "Huawei GPON ONU")
+	_, _, err = database.ApproveMaterialRequestTransaction("req_billing_2", "tenant_safari", "usr_safari_admin")
+	assert.NoError(t, err)
+
+	// Transition to Customer_Installation (stays Pending_Payment)
+	err = database.UpdateInvoiceNoteUsageType("note_req_billing_2", "tenant_safari", "Customer_Installation", "cust_test_billing")
+	assert.NoError(t, err)
+
+	err = database.Pool.QueryRow(ctx, "SELECT status FROM invoice_notes WHERE id = 'note_req_billing_2'").Scan(&noteStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, "Pending_Payment", noteStatus)
+
+	// Now update task_billing_1 to Completed (this should reconcile the pending note to Reconciliation_Started!)
+	task.Status = "Completed"
+	database.SaveTask(task)
+
+	// Verify note status is now Reconciliation_Started
+	err = database.Pool.QueryRow(ctx, "SELECT status FROM invoice_notes WHERE id = 'note_req_billing_2'").Scan(&noteStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, "Reconciliation_Started", noteStatus)
+
+	// 6. Procurement Order Purchase Receipt Confirmation & Auto-Add Serial
+	// Let's create a low-stock procurement order
+	_, err = database.Pool.Exec(ctx, "INSERT INTO procurement_orders (id, tenant_id, item_name, status) VALUES ('proc_test_99', 'tenant_safari', 'Huawei GPON ONU', 'Bidding')")
+	assert.NoError(t, err)
+
+	// Confirm receipt with photo/barcode attachment
+	err = database.ConfirmProcurementReceipt("proc_test_99", "tenant_safari", "Alice Admin", "https://imgur.com/gpon_router_barcode.png")
+	assert.NoError(t, err)
+
+	// Verify procurement order status became Completed
+	var procStatus, confirmedBy, photoURL string
+	err = database.Pool.QueryRow(ctx, "SELECT status, confirmed_by, barcode_photo_url FROM procurement_orders WHERE id = 'proc_test_99'").Scan(&procStatus, &confirmedBy, &photoURL)
+	assert.NoError(t, err)
+	assert.Equal(t, "Completed", procStatus)
+	assert.Equal(t, "Alice Admin", confirmedBy)
+	assert.Equal(t, "https://imgur.com/gpon_router_barcode.png", photoURL)
+
+	// Verify that the auto-scanning scanner successfully generated a new item in stock automatically!
+	var inStockCount int
+	err = database.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM inventory_items WHERE tenant_id = 'tenant_safari' AND name = 'Huawei GPON ONU' AND status = 'In_Stock' AND serial_number LIKE 'SN-AUTO-PROC-%'").Scan(&inStockCount)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, inStockCount)
 }

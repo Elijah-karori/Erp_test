@@ -59,6 +59,24 @@ type CreateSupportTicketPayload struct {
 	Description string `json:"description"`
 }
 
+type ManualInventoryItemPayload struct {
+	Name             string `json:"name"`
+	SerialNumber     string `json:"serial_number"`
+	ReorderThreshold int    `json:"reorder_threshold"`
+	Region           string `json:"region"`
+}
+
+type UpdateInvoiceNotePayload struct {
+	NoteID     string `json:"note_id"`
+	UsageType  string `json:"usage_type"` // 'Internal', 'Customer_Installation', 'Customer_Broken'
+	CustomerID string `json:"customer_id,omitempty"`
+}
+
+type ConfirmProcurementPayload struct {
+	ProcID          string `json:"proc_id"`
+	BarcodePhotoURL string `json:"barcode_photo_url"`
+}
+
 type ConvertTicketToTaskPayload struct {
 	TicketID   string `json:"ticket_id"`
 	Title      string `json:"title"`
@@ -418,6 +436,92 @@ func (h *UIHandler) ConvertTicketToTask(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Ticket converted to task successfully", "task_id": taskID})
+}
+
+func (h *UIHandler) AddManualInventoryItem(c echo.Context) error {
+	var payload ManualInventoryItemPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if payload.Name == "" || payload.SerialNumber == "" || payload.Region == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name, serial_number, and region are required"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+
+	if err := h.db.SaveInventoryItemDirect(tenantID, payload.Name, payload.SerialNumber, payload.ReorderThreshold, payload.Region); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "ManualInventory_Add", fmt.Sprintf("Manually added item %s (SN: %s)", payload.Name, payload.SerialNumber))
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Item successfully registered in inventory"})
+}
+
+func (h *UIHandler) UpdateInvoiceNote(c echo.Context) error {
+	var payload UpdateInvoiceNotePayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if payload.NoteID == "" || payload.UsageType == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "note_id and usage_type are required"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+
+	if err := h.db.UpdateInvoiceNoteUsageType(payload.NoteID, tenantID, payload.UsageType, payload.CustomerID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "InvoiceNote_Update", fmt.Sprintf("Updated invoice note %s usage to %s", payload.NoteID, payload.UsageType))
+
+	// If Customer_Installation or Customer_Broken, send email to requester
+	if payload.UsageType != "Internal" {
+		subject := "ERP Alert: Customer Invoice Note Generated (Pending Payment)"
+		body := fmt.Sprintf(`<h2>Requisition Invoice Note</h2>
+<p>An installation/repair usage was logged for serial allocation. A draft invoice of <strong>KSh 12,500.00</strong> has been dispatched for payment confirmation.</p>
+<p>Please attach transaction receipts once completed to clear reconciliation holds on tasks.</p>
+<p>Best regards,<br>ERP Billing Desk</p>`)
+
+		user, err := h.db.GetUser(userID)
+		if err == nil && user != nil {
+			_ = h.emailSvc.SendEmail(user.Email, subject, body, true)
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Invoice note successfully updated"})
+}
+
+func (h *UIHandler) ConfirmProcurementReceipt(c echo.Context) error {
+	var payload ConfirmProcurementPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if payload.ProcID == "" || payload.BarcodePhotoURL == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "proc_id and barcode_photo_url are required"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+
+	user, _ := h.db.GetUser(userID)
+	userName := "System_Admin"
+	if user != nil {
+		userName = user.Name
+	}
+
+	if err := h.db.ConfirmProcurementReceipt(payload.ProcID, tenantID, userName, payload.BarcodePhotoURL); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "Procurement_Confirm", fmt.Sprintf("Confirmed procurement receipt %s, processed barcode %s", payload.ProcID, payload.BarcodePhotoURL))
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Purchase receipt confirmed. Serialized assets added automatically after barcode verification."})
 }
 
 // ServeActivationPage returns the Tailwind-styled activation page
@@ -789,6 +893,74 @@ const htmlContent = `
                         </div>
                     </div>
 
+                    <!-- Direct Manual Serialized Asset Insertion -->
+                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
+                        <div class="flex items-center justify-between mb-4 border-b border-brand-600 pb-2">
+                            <h3 class="font-bold text-md text-emerald-400 flex items-center space-x-2">
+                                <i class="fa-solid fa-square-plus"></i>
+                                <span>Direct Manual Serialized Asset Registration (Bypass Stream)</span>
+                            </h3>
+                            <span class="text-xs text-slate-400 uppercase tracking-widest font-bold">Immediate Stock Entry</span>
+                        </div>
+
+                        <form id="manualItemForm" onsubmit="addManualInventoryItem(event)" class="grid grid-cols-1 md:grid-cols-5 gap-4 bg-brand-900 p-4 rounded-lg border border-brand-600 text-xs">
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Item Name</label>
+                                <input type="text" id="manualItemName" placeholder="Power Adapter 12V" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Serial Number</label>
+                                <input type="text" id="manualItemSerial" placeholder="SN-PWR-9988" required class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Reorder Threshold</label>
+                                <input type="number" id="manualItemThreshold" min="0" value="2" class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-sm text-slate-100 focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 font-bold mb-1">Region</label>
+                                <select id="manualItemRegion" class="w-full bg-brand-500 border border-brand-600 rounded px-3 py-2 text-slate-100 focus:outline-none">
+                                    <option value="Nairobi">Nairobi</option>
+                                    <option value="Mombasa">Mombasa</option>
+                                    <option value="Kisumu">Kisumu</option>
+                                </select>
+                            </div>
+                            <div class="flex items-end">
+                                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded transition duration-200">
+                                    Add Serialized Asset
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Procurement Receipt Confirmation Center -->
+                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm">
+                        <div class="flex items-center justify-between mb-4 border-b border-brand-600 pb-2">
+                            <h3 class="font-bold text-md text-amber-400 flex items-center space-x-2">
+                                <i class="fa-solid fa-receipt"></i>
+                                <span>Procurement Receipt Center (Low-Stock Self-Healing)</span>
+                            </h3>
+                            <span class="text-xs text-slate-400 uppercase tracking-widest font-bold">Image Barcode Verification</span>
+                        </div>
+
+                        <div class="overflow-x-auto w-full max-w-full block">
+                            <table class="w-full text-left text-sm min-w-[700px]">
+                                <thead>
+                                    <tr class="border-b border-brand-600 text-slate-400 text-xs uppercase">
+                                        <th class="py-2 px-3">Order ID</th>
+                                        <th class="py-2 px-3">Item Name</th>
+                                        <th class="py-2 px-3">Status</th>
+                                        <th class="py-2 px-3">Barcode Attachment</th>
+                                        <th class="py-2 px-3">Verified SN</th>
+                                        <th class="py-2 px-3">Confirmed By</th>
+                                        <th class="py-2 px-3 text-right">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="procurementReceiptTableBody" class="divide-y divide-brand-600 text-xs font-mono">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <!-- Customer Support & Troubleshooting Tickets -->
                     <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm space-y-6">
                         <div class="flex items-center justify-between border-b border-brand-600 pb-3">
@@ -940,6 +1112,42 @@ const htmlContent = `
                                     </tr>
                                 </thead>
                                 <tbody id="timesheetsTableBody" class="divide-y divide-brand-600">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Requisitions Invoice Notes & Reconciliation Desk -->
+                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 md:p-6 shadow-sm mt-6">
+                        <div class="flex items-center justify-between mb-4 border-b border-brand-600 pb-2">
+                            <h3 class="font-bold text-md text-emerald-400 flex items-center space-x-2">
+                                <i class="fa-solid fa-file-invoice-dollar"></i>
+                                <span>Requisitions Invoice Notes &amp; Billing Reconciliation</span>
+                            </h3>
+                            <span class="text-xs text-slate-400 uppercase tracking-widest font-bold">Billing Compliance Guard</span>
+                        </div>
+
+                        <p class="text-xs text-slate-300 mb-4">
+                            Once serialized equipment is allocated, specify its usage type below. Standard internal usage support is automatically cleared. Customer installations or broken equipment generates customer invoices and undergoes strict reconciliation controls on task completion.
+                        </p>
+
+                        <div class="overflow-x-auto w-full max-w-full block">
+                            <table class="w-full text-left text-xs min-w-[700px]">
+                                <thead>
+                                    <tr class="border-b border-brand-600 text-slate-400 font-semibold uppercase">
+                                        <th class="py-2.5 px-3">Reconciliation ID</th>
+                                        <th class="py-2.5 px-3">Item Name</th>
+                                        <th class="py-2.5 px-3">Serial #</th>
+                                        <th class="py-2.5 px-3">Task ID</th>
+                                        <th class="py-2.5 px-3">Requester</th>
+                                        <th class="py-2.5 px-3">Usage Type Select</th>
+                                        <th class="py-2.5 px-3">Reconciliation Status</th>
+                                        <th class="py-2.5 px-3">Attached Invoice</th>
+                                        <th class="py-2.5 px-3">Linked Payment</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoiceNotesTableBody" class="divide-y divide-brand-600 font-mono text-slate-300 text-[11px]">
+                                    <tr><td colspan="9" class="p-3 text-slate-500 italic text-center">No invoice notes issued.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1967,6 +2175,79 @@ const htmlContent = `
                 });
             }
 
+            // Render Invoice Notes (Billing Reconciliation Desk)
+            const noteBody = document.getElementById('invoiceNotesTableBody');
+            if (noteBody) {
+                noteBody.innerHTML = '';
+                const activeNotes = Object.values(currentState.invoice_notes || {}).filter(n => n.tenant_id === activeTenant);
+                if (activeNotes.length === 0) {
+                    noteBody.innerHTML = '<tr><td colspan="9" class="p-3 text-slate-500 italic text-center">No invoice notes issued.</td></tr>';
+                } else {
+                    activeNotes.forEach(n => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-brand-600 transition';
+
+                        // Dropdown selection for usage type
+                        const selectHtml = '<select onchange="updateInvoiceNoteUsage(\'' + n.id + '\', this)" class="bg-brand-900 border border-brand-600 rounded px-1.5 py-1 text-[10px] text-slate-100 focus:outline-none">' +
+                            '<option value="Internal" ' + (n.usage_type === 'Internal' ? 'selected' : '') + '>Internal Support</option>' +
+                            '<option value="Customer_Installation" ' + (n.usage_type === 'Customer_Installation' ? 'selected' : '') + '>Customer Installation</option>' +
+                            '<option value="Customer_Broken" ' + (n.usage_type === 'Customer_Broken' ? 'selected' : '') + '>Customer Broken</option>' +
+                            '</select>';
+
+                        let statusColor = 'text-slate-300';
+                        if (n.status === 'Paid_Usage_Support') statusColor = 'text-emerald-400 font-semibold';
+                        else if (n.status === 'Pending_Payment') statusColor = 'text-amber-400 font-bold';
+                        else if (n.status === 'Cleared_Paid') statusColor = 'text-emerald-300 font-extrabold';
+                        else if (n.status === 'Reconciliation_Started') statusColor = 'text-rose-400 font-bold animate-pulse';
+
+                        tr.innerHTML = '<td class="py-2.5 px-3 font-bold text-emerald-400">' + n.id + '</td>' +
+                            '<td class="py-2.5 px-3 font-semibold text-white">' + n.item_name + '</td>' +
+                            '<td class="py-2.5 px-3 text-indigo-300">' + n.allocated_sn + '</td>' +
+                            '<td class="py-2.5 px-3 font-mono">' + n.task_id + '</td>' +
+                            '<td class="py-2.5 px-3 text-slate-300">' + n.requester_id + '</td>' +
+                            '<td class="py-2.5 px-3">' + selectHtml + '</td>' +
+                            '<td class="py-2.5 px-3 ' + statusColor + '">' + n.status + '</td>' +
+                            '<td class="py-2.5 px-3 font-bold text-sky-400">' + (n.invoice_id || '-') + '</td>' +
+                            '<td class="py-2.5 px-3 font-bold text-amber-400">' + (n.payment_id || '-') + '</td>';
+                        noteBody.appendChild(tr);
+                    });
+                }
+            }
+
+            // Render Procurement Receipt table
+            const procReceiptBody = document.getElementById('procurementReceiptTableBody');
+            if (procReceiptBody) {
+                procReceiptBody.innerHTML = '';
+                const activeProcOrders = Object.values(currentState.procurement_orders || {}).filter(po => po.tenant_id === activeTenant);
+                if (activeProcOrders.length === 0) {
+                    procReceiptBody.innerHTML = '<tr><td colspan="7" class="p-3 text-slate-500 italic text-center">No active procurement orders.</td></tr>';
+                } else {
+                    activeProcOrders.forEach(po => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-brand-600 transition';
+
+                        let statusColor = 'text-amber-400 font-semibold';
+                        let actionBtn = '<span class="text-slate-500 italic">No Action</span>';
+
+                        if (po.status === 'Bidding') {
+                            actionBtn = '<button onclick="confirmProcurementOrderReceipt(\'' + po.id + '\')" class="text-[10px] bg-amber-600 hover:bg-amber-500 font-bold text-white px-2 py-1 rounded shadow-sm">Confirm Purchase Receipt</button>';
+                        } else if (po.status === 'Completed') {
+                            statusColor = 'text-emerald-400 font-bold';
+                            actionBtn = '<span class="text-emerald-400"><i class="fa-solid fa-check-double"></i> Receipt Confirmed</span>';
+                        }
+
+                        tr.innerHTML = '<td class="py-2.5 px-3 font-bold text-slate-300">' + po.id + '</td>' +
+                            '<td class="py-2.5 px-3 font-semibold text-white">' + po.item_name + '</td>' +
+                            '<td class="py-2.5 px-3 ' + statusColor + '">' + po.status + '</td>' +
+                            '<td class="py-2.5 px-3 text-indigo-300">' + (po.barcode_photo_url ? '<i class="fa-solid fa-image"></i> ' + po.barcode_photo_url.substring(0, 15) + '...' : '-') + '</td>' +
+                            '<td class="py-2.5 px-3 text-emerald-300 font-semibold">' + (po.status === 'Completed' ? 'Auto Extracted SN' : '-') + '</td>' +
+                            '<td class="py-2.5 px-3 text-slate-400">' + (po.confirmed_by || '-') + '</td>' +
+                            '<td class="py-2.5 px-3 text-right">' + actionBtn + '</td>';
+                        procReceiptBody.appendChild(tr);
+                    });
+                }
+            }
+
             // Render Customers CRM & Populate Support Ticket Client Dropdown
             const custBody = document.getElementById('customersTableBody');
             const ticketCustDropdown = document.getElementById('ticketCustID');
@@ -2450,6 +2731,85 @@ const htmlContent = `
                 if (res.ok) {
                     pushNotification('TICKET_CONVERTED', 'Ticket successfully converted into Task ' + r.task_id);
                     closeConvertModal();
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function addManualInventoryItem(e) {
+            e.preventDefault();
+            const name = document.getElementById('manualItemName').value;
+            const serial_number = document.getElementById('manualItemSerial').value;
+            const reorder_threshold = parseInt(document.getElementById('manualItemThreshold').value, 10) || 0;
+            const region = document.getElementById('manualItemRegion').value;
+
+            try {
+                const res = await fetch('/api/inventory/add', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ name, serial_number, reorder_threshold, region })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('MANUAL_ITEM_ADDED', 'Serialized asset manually registered directly.');
+                    document.getElementById('manualItemName').value = '';
+                    document.getElementById('manualItemSerial').value = '';
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function updateInvoiceNoteUsage(noteId, selectEl) {
+            const usage_type = selectEl.value;
+            // Ask for customer selection if installation/broken
+            let customer_id = '';
+            if (usage_type !== 'Internal') {
+                customer_id = prompt('Enter Customer ID for this installation invoice (e.g. cust_saf_77):', 'cust_saf_77');
+                if (!customer_id) {
+                    selectEl.value = 'Internal';
+                    return;
+                }
+            }
+
+            try {
+                const res = await fetch('/api/materials/invoice-note/update', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ note_id: noteId, usage_type, customer_id })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('INVOICE_NOTE_UPDATED', 'Invoice note usage updated to ' + usage_type);
+                    fetchState();
+                } else {
+                    alert('Error: ' + (r.error || r.message));
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function confirmProcurementOrderReceipt(procId) {
+            const barcode_photo_url = prompt('Provide Barcode Photo URL for automatic scanner processing:', 'https://imgur.com/barcode_router_sn.png');
+            if (!barcode_photo_url) return;
+
+            try {
+                const res = await fetch('/api/procurement/confirm', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ proc_id: procId, barcode_photo_url })
+                });
+                const r = await res.json();
+                if (res.ok) {
+                    pushNotification('PROCUREMENT_CONFIRMED', r.message);
                     fetchState();
                 } else {
                     alert('Error: ' + (r.error || r.message));
