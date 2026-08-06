@@ -117,6 +117,9 @@ func main() {
 	api.POST("/users/update-role", uiHandler.UpdateUserRole, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	api.POST("/tickets", uiHandler.CreateSupportTicket, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	api.POST("/tickets/convert", uiHandler.ConvertTicketToTask, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/inventory/add", uiHandler.AddManualInventoryItem, middleware.ModuleClearanceMiddleware(database, "inventory:write"))
+	api.POST("/materials/invoice-note/update", uiHandler.UpdateInvoiceNote, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/procurement/confirm", uiHandler.ConfirmProcurementReceipt, middleware.ModuleClearanceMiddleware(database, "inventory:write"))
 	// Previously registered directly on `e`, bypassing JWTAuthMiddleware
 	// entirely — anyone could download the full audit log with no token.
 	api.GET("/exports/excel", uiHandler.ExportLogsExcel)

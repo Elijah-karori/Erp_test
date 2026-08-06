@@ -147,7 +147,10 @@ create table procurement_orders (
     request_id    text references material_requests(id),
     item_name     text not null,
     expected_time timestamptz,
-    status        text not null default 'Bidding'
+    status        text not null default 'Bidding',
+    barcode_photo_url text,
+    confirmed_at  timestamptz,
+    confirmed_by  text
 );
 create index idx_procurement_tenant on procurement_orders(tenant_id);
 
@@ -331,3 +334,25 @@ create index idx_inventory_history_tenant on inventory_history(tenant_id);
 alter table inventory_history enable row level security;
 alter table inventory_history force row level security;
 create policy tenant_isolation on inventory_history using (tenant_id = current_setting('app.current_tenant_id', true));
+
+-- ============================================================
+-- INVOICE NOTES & SERIALIZED REQUISITIONS (New Workflows)
+-- ============================================================
+create table invoice_notes (
+    id           text primary key,
+    tenant_id    text not null references tenants(id) on delete cascade,
+    request_id   text not null references material_requests(id) on delete cascade,
+    item_name    text not null,
+    allocated_sn text not null,
+    task_id      text,
+    requester_id text not null references users(id),
+    usage_type   text not null default 'Internal', -- 'Internal', 'Customer_Installation', 'Customer_Broken'
+    status       text not null default 'Paid_Usage_Support', -- 'Paid_Usage_Support', 'Pending_Payment', 'Cleared_Paid', 'Reconciliation_Started'
+    invoice_id   text references invoices(id) on delete set null,
+    payment_id   text references payments(id) on delete set null,
+    created_at   timestamptz not null default now()
+);
+create index idx_invoice_notes_tenant on invoice_notes(tenant_id);
+alter table invoice_notes enable row level security;
+alter table invoice_notes force row level security;
+create policy tenant_isolation on invoice_notes using (tenant_id = current_setting('app.current_tenant_id', true));
