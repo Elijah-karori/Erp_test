@@ -16,12 +16,16 @@ import (
 	"erp-event-bus/db"
 	"erp-event-bus/email"
 	"erp-event-bus/handler"
+	"erp-event-bus/internal/env"
 	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
+	// 1. Perform strict startup environment validation
+	envConfig := env.ValidateAndLoad()
+
 	emailSvc := email.NewEmailService()
 	bus, err := eventbus.Start()
 	if err != nil {
@@ -35,15 +39,7 @@ func main() {
 	nc := bus.Conn
 	js := bus.JS
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = os.Getenv("SUPABASE_DB_URL")
-	}
-	if dbURL == "" {
-		log.Fatalf("DATABASE_URL or SUPABASE_DB_URL environment variable is required")
-	}
-
-	config, err := pgxpool.ParseConfig(dbURL)
+	config, err := pgxpool.ParseConfig(envConfig.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Failed to parse DATABASE_URL: %v", err)
 	}

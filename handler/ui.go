@@ -138,7 +138,7 @@ func (h *UIHandler) CreateUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id, tenant_id, name, email, role_name, and region are all required"})
 	}
 
-	tempPassword := uuid.NewString()[:12]
+	tempPassword := "TempPass123!" + uuid.NewString()[:8]
 	hash, err := auth.HashPassword(tempPassword)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to provision credentials"})
@@ -1330,11 +1330,22 @@ const htmlContent = `
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Password (min. 8 characters)</label>
-                <input type="password" id="regPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                <input type="password" id="regPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none" oninput="validatePasswordStrength('regPassword', 'regPass')">
+                <div id="regPassChecklist" class="mt-1.5 p-1.5 bg-brand-950/40 rounded border border-brand-600/30 space-y-1 text-[11px]">
+                    <div id="regPassLength"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">At least 8 characters</span></div>
+                    <div id="regPassUpper"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One uppercase letter</span></div>
+                    <div id="regPassLower"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One lowercase letter</span></div>
+                    <div id="regPassDigit"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One digit (0-9)</span></div>
+                    <div id="regPassSpecial"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One special character (!@#$%^&* etc.)</span></div>
+                </div>
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Working Region</label>
-                <input type="text" id="regRegion" placeholder="Mombasa" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                <select id="regRegion" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                    <option value="Nairobi">Nairobi</option>
+                    <option value="Mombasa">Mombasa</option>
+                    <option value="Kisumu">Kisumu</option>
+                </select>
             </div>
 
             <div class="pt-2 border-t border-brand-600 space-y-2">
@@ -1433,7 +1444,11 @@ const htmlContent = `
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-[11px] font-bold text-slate-400 mb-1">Working Region</label>
-                        <input type="text" id="inviteRegion" placeholder="Nairobi" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                        <select id="inviteRegion" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
+                            <option value="Nairobi">Nairobi</option>
+                            <option value="Mombasa">Mombasa</option>
+                            <option value="Kisumu">Kisumu</option>
+                        </select>
                     </div>
                     <div>
                         <label class="block text-[11px] font-bold text-slate-400 mb-1">Assign Reporting Manager</label>
@@ -1522,7 +1537,14 @@ const htmlContent = `
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Enter New Password</label>
-                <input type="password" id="resetModalNewPassword" placeholder="e.g. ksh8890" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
+                <input type="password" id="resetModalNewPassword" placeholder="e.g. ksh8890" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none" oninput="validatePasswordStrength('resetModalNewPassword', 'resetPass')">
+                <div id="resetPassChecklist" class="mt-1.5 p-1.5 bg-brand-950/40 rounded border border-brand-600/30 space-y-1 text-[11px]">
+                    <div id="resetPassLength"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">At least 8 characters</span></div>
+                    <div id="resetPassUpper"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One uppercase letter</span></div>
+                    <div id="resetPassLower"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One lowercase letter</span></div>
+                    <div id="resetPassDigit"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One digit (0-9)</span></div>
+                    <div id="resetPassSpecial"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One special character (!@#$%^&* etc.)</span></div>
+                </div>
             </div>
             <div class="flex space-x-2 pt-2 justify-end">
                 <button onclick="closePasswordResetModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
@@ -1563,6 +1585,28 @@ const htmlContent = `
     </div>
 
     <script>
+        function validatePasswordStrength(inputId, prefix) {
+            const val = document.getElementById(inputId).value;
+            const criteria = {
+                Length: { ok: val.length >= 8, txt: "At least 8 characters" },
+                Upper: { ok: /[A-Z]/.test(val), txt: "One uppercase letter" },
+                Lower: { ok: /[a-z]/.test(val), txt: "One lowercase letter" },
+                Digit: { ok: /[0-9]/.test(val), txt: "One digit (0-9)" },
+                Special: { ok: /[^A-Za-z0-9]/.test(val), txt: "One special character (!@#$%^&* etc.)" }
+            };
+
+            for (const key in criteria) {
+                const el = document.getElementById(prefix + key);
+                if (!el) continue;
+                const item = criteria[key];
+                if (item.ok) {
+                    el.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i> <span class="text-emerald-400">' + item.txt + '</span>';
+                } else {
+                    el.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">' + item.txt + '</span>';
+                }
+            }
+        }
+
         let currentState = {};
         let currentHeaders = {};
         let currentUser = {};
@@ -2347,10 +2391,16 @@ const htmlContent = `
                     }
 
                     // Role assignment select dropdown
+                    const roleFriendlyNames = {
+                        'field_technician': 'Field Technician',
+                        'manager': 'Reporting Manager',
+                        'finance_officer': 'Finance Officer',
+                        'tenant_admin': 'Tenant Administrator'
+                    };
                     let roleSelect = '<select onchange="updateTeammateRole(\'' + u.id + '\', this.value)" class="bg-brand-900 border border-brand-600 rounded text-xs px-2 py-1 text-slate-200 focus:outline-none">';
                     ['field_technician', 'manager', 'finance_officer', 'tenant_admin'].forEach(r => {
                         const isSelected = r === u.role_name ? 'selected' : '';
-                        roleSelect += '<option value="' + r + '" ' + isSelected + '>' + r + '</option>';
+                        roleSelect += '<option value="' + r + '" ' + isSelected + '>' + (roleFriendlyNames[r] || r) + '</option>';
                     });
                     roleSelect += '</select>';
 
@@ -2382,9 +2432,15 @@ const htmlContent = `
                         const statusColor = inv.status === 'Pending' ? 'text-amber-400' : 'text-emerald-400';
                         const activationUrl = window.location.origin + '/activate.html?token=' + inv.token + '&tenant_id=' + inv.tenant_id + '&role_assignment_id=' + inv.role_name;
 
+                        const roleFriendlyNames = {
+                            'field_technician': 'Field Technician',
+                            'manager': 'Reporting Manager',
+                            'finance_officer': 'Finance Officer',
+                            'tenant_admin': 'Tenant Administrator'
+                        };
                         tr.innerHTML = '<td class="py-2 px-3">' + inv.email + '</td>' +
                             '<td class="py-2 px-3 font-semibold text-white">' + inv.name + '</td>' +
-                            '<td class="py-2 px-3"><span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[10px]">' + inv.role_name + '</span></td>' +
+                            '<td class="py-2 px-3"><span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[10px]">' + (roleFriendlyNames[inv.role_name] || inv.role_name) + '</span></td>' +
                             '<td class="py-2 px-3">' + inv.region + '</td>' +
                             '<td class="py-2 px-3 ' + statusColor + '">' + inv.status + '</td>' +
                             '<td class="py-2 px-3 text-right">' +
@@ -3088,7 +3144,14 @@ const activationHtmlContent = `
         <form onsubmit="handleActivation(event)" class="space-y-4">
             <div>
                 <label class="block text-xs font-bold text-slate-400 mb-1">Choose Password (min. 8 chars)</label>
-                <input type="password" id="actPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                <input type="password" id="actPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400" oninput="validatePasswordStrength('actPassword', 'actPass')">
+                <div id="actPassChecklist" class="mt-2 p-2 bg-brand-950/40 rounded border border-brand-600/30 space-y-1 text-[11px]">
+                    <div id="actPassLength"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">At least 8 characters</span></div>
+                    <div id="actPassUpper"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One uppercase letter</span></div>
+                    <div id="actPassLower"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One lowercase letter</span></div>
+                    <div id="actPassDigit"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One digit (0-9)</span></div>
+                    <div id="actPassSpecial"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One special character (!@#$%^&* etc.)</span></div>
+                </div>
             </div>
             <div>
                 <label class="block text-xs font-bold text-slate-400 mb-1">Confirm Password</label>
@@ -3107,10 +3170,39 @@ const activationHtmlContent = `
     </div>
 
     <script>
+        function validatePasswordStrength(inputId, prefix) {
+            const val = document.getElementById(inputId).value;
+            const criteria = {
+                Length: { ok: val.length >= 8, txt: "At least 8 characters" },
+                Upper: { ok: /[A-Z]/.test(val), txt: "One uppercase letter" },
+                Lower: { ok: /[a-z]/.test(val), txt: "One lowercase letter" },
+                Digit: { ok: /[0-9]/.test(val), txt: "One digit (0-9)" },
+                Special: { ok: /[^A-Za-z0-9]/.test(val), txt: "One special character (!@#$%^&* etc.)" }
+            };
+
+            for (const key in criteria) {
+                const el = document.getElementById(prefix + key);
+                if (!el) continue;
+                const item = criteria[key];
+                if (item.ok) {
+                    el.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i> <span class="text-emerald-400">' + item.txt + '</span>';
+                } else {
+                    el.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">' + item.txt + '</span>';
+                }
+            }
+        }
+
         const params = new URLSearchParams(window.location.search);
         const token = params.get('token');
         const urlTenant = params.get('tenant_id');
         const urlRole = params.get('role_assignment_id');
+
+        const roleFriendlyNames = {
+            'field_technician': 'Field Technician',
+            'manager': 'Reporting Manager',
+            'finance_officer': 'Finance Officer',
+            'tenant_admin': 'Tenant Administrator'
+        };
 
         async function loadInvitationPreview() {
             if (!token) {
@@ -3120,7 +3212,7 @@ const activationHtmlContent = `
 
             // Fill standard values from URL as quick fallback
             document.getElementById('previewTenant').textContent = urlTenant || "SME Tenant";
-            document.getElementById('previewRole').textContent = urlRole || "field_technician";
+            document.getElementById('previewRole').textContent = roleFriendlyNames[urlRole] || urlRole || "Field Technician";
 
             try {
                 const res = await fetch('/api/invite/preview?token=' + encodeURIComponent(token));
@@ -3128,7 +3220,7 @@ const activationHtmlContent = `
                     const data = await res.json();
                     document.getElementById('previewName').textContent = data.name;
                     document.getElementById('previewTenant').textContent = data.tenant_id;
-                    document.getElementById('previewRole').textContent = data.role_name;
+                    document.getElementById('previewRole').textContent = roleFriendlyNames[data.role_name] || data.role_name;
                 } else {
                     document.getElementById('previewName').textContent = "Invited Colleague";
                 }
