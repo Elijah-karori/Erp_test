@@ -285,3 +285,28 @@ type ConvertTicketToTaskCommand struct {
 	AssignedTo string `json:"assigned_to"`
 	DependsOn  string `json:"depends_on,omitempty"`
 }
+
+// Vehicle Telemetry Model
+type VehicleTelemetry struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	UserID      string    `json:"user_id"`
+	VehicleName string    `json:"vehicle_name"`
+	Odometer    float64   `json:"odometer"`
+	Latitude    float64   `json:"latitude"`
+	Longitude   float64   `json:"longitude"`
+	Speed       float64   `json:"speed"`
+	FuelLevel   float64   `json:"fuel_level"`
+	Status      string    `json:"status"` // 'Active', 'Idle', 'Parked'
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RecordTelemetryCommand struct {
+	VehicleName string  `json:"vehicle_name"`
+	Odometer    float64 `json:"odometer"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Speed       float64 `json:"speed"`
+	FuelLevel   float64 `json:"fuel_level"`
+	Status      string  `json:"status"`
+}

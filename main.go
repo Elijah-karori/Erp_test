@@ -16,16 +16,12 @@ import (
 	"erp-event-bus/db"
 	"erp-event-bus/email"
 	"erp-event-bus/handler"
-	"erp-event-bus/internal/env"
 	"erp-event-bus/internal/eventbus"
 	"erp-event-bus/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
-	// 1. Perform strict startup environment validation
-	envConfig := env.ValidateAndLoad()
-
 	emailSvc := email.NewEmailService()
 	bus, err := eventbus.Start()
 	if err != nil {
@@ -39,7 +35,15 @@ func main() {
 	nc := bus.Conn
 	js := bus.JS
 
-	config, err := pgxpool.ParseConfig(envConfig.DatabaseURL)
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("SUPABASE_DB_URL")
+	}
+	if dbURL == "" {
+		log.Fatalf("DATABASE_URL or SUPABASE_DB_URL environment variable is required")
+	}
+
+	config, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
 		log.Fatalf("Failed to parse DATABASE_URL: %v", err)
 	}
@@ -113,6 +117,7 @@ func main() {
 	api.POST("/users/update-role", uiHandler.UpdateUserRole, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	api.POST("/tickets", uiHandler.CreateSupportTicket, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	api.POST("/tickets/convert", uiHandler.ConvertTicketToTask, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/telematics/ping", uiHandler.RecordTelematicsPing)
 	api.POST("/inventory/add", uiHandler.AddManualInventoryItem, middleware.ModuleClearanceMiddleware(database, "inventory:write"))
 	api.POST("/materials/invoice-note/update", uiHandler.UpdateInvoiceNote, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
 	api.POST("/procurement/confirm", uiHandler.ConfirmProcurementReceipt, middleware.ModuleClearanceMiddleware(database, "inventory:write"))

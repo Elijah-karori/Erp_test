@@ -270,6 +270,27 @@ func (d *Database) SaveInvoice(invoice *types.Invoice) {
 	})
 }
 
+func (d *Database) SaveTelemetry(tenantID, userID, vehicleName string, odometer, latitude, longitude, speed, fuelLevel float64, status string) error {
+	ctx := context.Background()
+	return d.withTx(ctx, tenantID, func(tx pgx.Tx) error {
+		id := "tel_" + vehicleName + "_" + userID
+		query := `
+			INSERT INTO vehicle_telemetry (id, tenant_id, user_id, vehicle_name, odometer, latitude, longitude, speed, fuel_level, status, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+			ON CONFLICT (id) DO UPDATE SET
+				odometer = EXCLUDED.odometer,
+				latitude = EXCLUDED.latitude,
+				longitude = EXCLUDED.longitude,
+				speed = EXCLUDED.speed,
+				fuel_level = EXCLUDED.fuel_level,
+				status = EXCLUDED.status,
+				created_at = NOW()
+		`
+		_, err := tx.Exec(ctx, query, id, tenantID, userID, vehicleName, odometer, latitude, longitude, speed, fuelLevel, status)
+		return err
+	})
+}
+
 func (d *Database) SaveInventoryItemDirect(tenantID, name, serialNumber string, reorderThreshold int, region string) error {
 	ctx := context.Background()
 	itemID := "item_man_" + uuid.NewString()[:8]
@@ -961,9 +982,29 @@ func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[stri
 		overdueTasks      = make(map[string]*types.Task)
 		invitations       = make(map[string]*types.Invitation)
 		supportTickets    = make(map[string]*types.SupportTicket)
+		telemetry         = make(map[string]*types.VehicleTelemetry)
 	)
 
 	g, gCtx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(gCtx, "SELECT id, tenant_id, user_id, vehicle_name, odometer, latitude, longitude, speed, fuel_level, status, created_at FROM vehicle_telemetry WHERE tenant_id = $1", tenantID)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var v types.VehicleTelemetry
+				if err := rows.Scan(&v.ID, &v.TenantID, &v.UserID, &v.VehicleName, &v.Odometer, &v.Latitude, &v.Longitude, &v.Speed, &v.FuelLevel, &v.Status, &v.CreatedAt); err == nil {
+					mu.Lock()
+					telemetry[v.ID] = &v
+					mu.Unlock()
+				}
+			}
+			return nil
+		})
+	})
 
 	g.Go(func() error {
 		return d.withTx(gCtx, tenantID, func(tx pgx.Tx) error {
@@ -1341,6 +1382,7 @@ func (d *Database) GetStateForTenant(tenantID, userID, roleName string) map[stri
 		"invitations":        invitations,
 		"support_tickets":    supportTickets,
 		"invoice_notes":      invoiceNotes,
+		"telemetry":          telemetry,
 	}
 }
 
@@ -1452,6 +1494,36 @@ func (d *Database) SeedIfNeeded() {
 			SELECT 1 FROM pg_policies WHERE tablename = 'invoice_notes' AND policyname = 'tenant_isolation'
 		) THEN
 			CREATE POLICY tenant_isolation ON invoice_notes USING (tenant_id = current_setting('app.current_tenant_id', true));
+		END IF;
+	END
+	$$;
+
+	-- Ensure vehicle_telemetry table exists
+	CREATE TABLE IF NOT EXISTS vehicle_telemetry (
+		id             text primary key,
+		tenant_id      text not null references tenants(id) on delete cascade,
+		user_id        text not null references users(id) on delete cascade,
+		vehicle_name   text not null,
+		odometer       double precision not null default 0.0,
+		latitude       double precision not null default 0.0,
+		longitude      double precision not null default 0.0,
+		speed          double precision not null default 0.0,
+		fuel_level     double precision not null default 100.0,
+		status         text not null default 'Parked',
+		created_at     timestamptz not null default now()
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_telemetry_tenant ON vehicle_telemetry(tenant_id);
+	CREATE INDEX IF NOT EXISTS idx_telemetry_user ON vehicle_telemetry(user_id);
+	ALTER TABLE vehicle_telemetry ENABLE ROW LEVEL SECURITY;
+	ALTER TABLE vehicle_telemetry FORCE ROW LEVEL SECURITY;
+
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM pg_policies WHERE tablename = 'vehicle_telemetry' AND policyname = 'tenant_isolation'
+		) THEN
+			CREATE POLICY tenant_isolation ON vehicle_telemetry USING (tenant_id = current_setting('app.current_tenant_id', true));
 		END IF;
 	END
 	$$;

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -52,49 +51,11 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// ValidatePassword ensures password strength rules:
-// - At least 8 characters
-// - At least one uppercase letter [A-Z]
-// - At least one lowercase letter [a-z]
-// - At least one numeric digit [0-9]
-// - At least one special character from the set: !@#$%^&*(),.?":{}|<>
-func ValidatePassword(plaintext string) error {
-	if len(plaintext) < 8 {
-		return errors.New("password must be at least 8 characters")
-	}
-	var hasUpper, hasLower, hasDigit, hasSpecial bool
-	for _, ch := range plaintext {
-		switch {
-		case ch >= 'A' && ch <= 'Z':
-			hasUpper = true
-		case ch >= 'a' && ch <= 'z':
-			hasLower = true
-		case ch >= '0' && ch <= '9':
-			hasDigit = true
-		case strings.ContainsRune("!@#$%^&*(),.?\":{}|<>", ch):
-			hasSpecial = true
-		}
-	}
-	if !hasUpper {
-		return errors.New("password must contain at least one uppercase letter")
-	}
-	if !hasLower {
-		return errors.New("password must contain at least one lowercase letter")
-	}
-	if !hasDigit {
-		return errors.New("password must contain at least one number")
-	}
-	if !hasSpecial {
-		return errors.New("password must contain at least one special character")
-	}
-	return nil
-}
-
 // HashPassword bcrypt-hashes a plaintext password for storage. Never store
 // or log the plaintext value it's called with.
 func HashPassword(plaintext string) (string, error) {
-	if err := ValidatePassword(plaintext); err != nil {
-		return "", err
+	if len(plaintext) < 8 {
+		return "", errors.New("password must be at least 8 characters")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
 	if err != nil {

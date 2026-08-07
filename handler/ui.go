@@ -138,7 +138,7 @@ func (h *UIHandler) CreateUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id, tenant_id, name, email, role_name, and region are all required"})
 	}
 
-	tempPassword := "TempPass123!" + uuid.NewString()[:8]
+	tempPassword := uuid.NewString()[:12]
 	hash, err := auth.HashPassword(tempPassword)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to provision credentials"})
@@ -344,6 +344,38 @@ func (h *UIHandler) CreateSupportTicket(c echo.Context) error {
 	h.sqliteDB.Log(tenantID, userID, "CreateTicket_Success", fmt.Sprintf("Support ticket %s created for customer %s", ticket.ID, ticket.CustomerID))
 
 	return c.JSON(http.StatusOK, ticket)
+}
+
+type TelematicsPingPayload struct {
+	VehicleName string  `json:"vehicle_name"`
+	Odometer    float64 `json:"odometer"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Speed       float64 `json:"speed"`
+	FuelLevel   float64 `json:"fuel_level"`
+	Status      string  `json:"status"`
+}
+
+func (h *UIHandler) RecordTelematicsPing(c echo.Context) error {
+	var payload TelematicsPingPayload
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if payload.VehicleName == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "vehicle_name is required"})
+	}
+
+	tenantID, _ := c.Get(middleware.ContextTenantID).(string)
+	userID, _ := c.Get(middleware.ContextUserID).(string)
+
+	if err := h.db.SaveTelemetry(tenantID, userID, payload.VehicleName, payload.Odometer, payload.Latitude, payload.Longitude, payload.Speed, payload.FuelLevel, payload.Status); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	h.sqliteDB.Log(tenantID, userID, "Telemetry_Recorded", fmt.Sprintf("Vehicle %s updated: odometer=%.1f, speed=%.1f, fuel=%.1f%%, status=%s", payload.VehicleName, payload.Odometer, payload.Speed, payload.FuelLevel, payload.Status))
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Telemetry recorded successfully"})
 }
 
 func (h *UIHandler) ConvertTicketToTask(c echo.Context) error {
@@ -1312,9 +1344,261 @@ const htmlContent = `
                     </div>
                 </div>
 
-            </div>
-        </div>
-    </div>
+                <!-- Module H: Telematics Desk -->
+                <div id="view_telematics" class="hidden space-y-6">
+                    <!-- Stat Highlights -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 shadow-sm flex items-center justify-between">
+                            <div>
+                                <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">Active Fleet Vehicles</p>
+                                <p id="telematicsStatVehicles" class="text-2xl font-bold text-white">0</p>
+                            </div>
+                            <div class="bg-emerald-950 p-2.5 rounded-lg text-emerald-400"><i class="fa-solid fa-truck"></i></div>
+                        </div>
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 shadow-sm flex items-center justify-between">
+                            <div>
+                                <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Mileage (Km)</p>
+                                <p id="telematicsStatMileage" class="text-2xl font-bold text-white">0.0</p>
+                            </div>
+                            <div class="bg-sky-950 p-2.5 rounded-lg text-sky-400"><i class="fa-solid fa-gauge-high"></i></div>
+                        </div>
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 shadow-sm flex items-center justify-between">
+                            <div>
+                                <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">Avg Fuel Level</p>
+                                <p id="telematicsStatFuel" class="text-2xl font-bold text-white">0%</p>
+                            </div>
+                            <div class="bg-amber-950 p-2.5 rounded-lg text-amber-400"><i class="fa-solid fa-gas-pump"></i></div>
+                        </div>
+                        <div class="bg-brand-500 rounded-xl border border-brand-600 p-4 shadow-sm flex items-center justify-between">
+                            <div>
+                                <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">Critical Speed Alerts</p>
+                                <p id="telematicsStatAlerts" class="text-2xl font-bold text-rose-400">0</p>
+                            </div>
+                            <div class="bg-rose-950 p-2.5 rounded-lg text-rose-400"><i class="fa-solid fa-triangle-exclamation animate-pulse"></i></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Left Side: Interactive Map & Simulator & Forms -->
+                        <div class="lg:col-span-2 space-y-6">
+                            <!-- Live Simulation / Vehicle Registration -->
+                            <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm space-y-4">
+                                <h3 class="font-bold text-lg text-emerald-400 flex items-center space-x-2">
+                                    <i class="fa-solid fa-satellite"></i>
+                                    <span>Live Telemetry & GPS Simulators</span>
+                                </h3>
+                                <p class="text-xs text-slate-300">Transmit real-time GPS telemetry packets, odometer counts, speed sensors, and fuel status dynamically into the multi-tenant event pipeline.</p>
+
+                                <!-- Technician-specific submission form -->
+                                <div id="telFormTechnician" class="hidden space-y-4 p-4 bg-brand-900/40 rounded-xl border border-brand-600/50">
+                                    <h4 class="font-bold text-sm text-sky-400 flex items-center gap-2"><i class="fa-solid fa-clipboard-user"></i> Log My Vehicle Telemetry</h4>
+                                    <form onsubmit="submitTelemetry(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Vehicle Plate / Name</label>
+                                            <input type="text" id="telTechVehicleName" placeholder="e.g. KDL-789G Toyota" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-100 text-sm focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Current Odometer (Km)</label>
+                                            <input type="number" id="telTechOdometer" step="0.1" value="1205.4" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-100 text-sm focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Simulated Speed (km/h)</label>
+                                            <input type="range" id="telTechSpeed" min="0" max="150" value="65" oninput="document.getElementById('telTechSpeedVal').textContent=this.value" class="w-full accent-emerald-500">
+                                            <p class="text-[10px] text-slate-400 mt-1">Value: <span id="telTechSpeedVal" class="font-bold text-white">65</span> km/h</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Fuel Level Percentage (%)</label>
+                                            <input type="range" id="telTechFuel" min="0" max="100" value="85" oninput="document.getElementById('telTechFuelVal').textContent=this.value" class="w-full accent-emerald-500">
+                                            <p class="text-[10px] text-slate-400 mt-1">Value: <span id="telTechFuelVal" class="font-bold text-white">85</span>%</p>
+                                        </div>
+                                        <div class="md:col-span-2 flex justify-end">
+                                            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 px-4 rounded transition">Publish Live Telemetry</button>
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <!-- Manager/Admin Simulator -->
+                                <div id="telFormAdmin" class="hidden space-y-4 p-4 bg-brand-900/40 rounded-xl border border-brand-600/50">
+                                    <h4 class="font-bold text-sm text-amber-400 flex items-center gap-2"><i class="fa-solid fa-gamepad"></i> Global Fleet Telematics Simulator</h4>
+                                    <form onsubmit="submitTelemetryAdmin(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Select Active Driver</label>
+                                            <select id="telAdminDriver" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-100 text-sm focus:outline-none"></select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Vehicle License Plate</label>
+                                            <input type="text" id="telAdminVehicleName" placeholder="e.g. KDM-456X Isuzu" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-100 text-sm focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Odometer (Km)</label>
+                                            <input type="number" id="telAdminOdometer" step="0.1" value="4820.0" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-100 text-sm focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Vehicle Status</label>
+                                            <select id="telAdminStatus" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-100 text-sm focus:outline-none">
+                                                <option value="Active">Active / On-Trip</option>
+                                                <option value="Idle">Idle / In Traffic</option>
+                                                <option value="Parked">Parked / Customer Site</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Speed Meter (km/h)</label>
+                                            <input type="range" id="telAdminSpeed" min="0" max="150" value="85" oninput="document.getElementById('telAdminSpeedVal').textContent=this.value" class="w-full accent-emerald-500">
+                                            <p class="text-[10px] text-slate-400 mt-1">Value: <span id="telAdminSpeedVal" class="font-bold text-white">85</span> km/h (speeds &gt; 100 trigger alert)</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-slate-400 mb-1">Fuel Tank Level (%)</label>
+                                            <input type="range" id="telAdminFuel" min="0" max="100" value="70" oninput="document.getElementById('telAdminFuelVal').textContent=this.value" class="w-full accent-emerald-500">
+                                            <p class="text-[10px] text-slate-400 mt-1">Value: <span id="telAdminFuelVal" class="font-bold text-white">70</span>%</p>
+                                        </div>
+                                        <div class="md:col-span-2 flex justify-end">
+                                            <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-4 rounded transition">Dispatch Simulated Fleet Signal</button>
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <!-- Live Interactive Grid Map Visualization -->
+                                <div class="space-y-2">
+                                    <div class="flex justify-between items-center text-xs font-bold text-slate-400">
+                                        <span>Interactive Grid Map Sim (Nairobi-Mombasa Transit Corridor)</span>
+                                        <span class="text-emerald-400 flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span> Live Map Tracking</span>
+                                    </div>
+                                    <div id="telematicsMap" class="h-44 bg-brand-950/80 rounded-xl border border-brand-600 relative overflow-hidden flex items-center justify-center">
+                                        <!-- Map background lines -->
+                                        <div class="absolute inset-0 grid grid-cols-6 grid-rows-3 opacity-10 pointer-events-none">
+                                            <div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-b border-slate-100"></div>
+                                            <div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-r border-b border-slate-100"></div><div class="border-b border-slate-100"></div>
+                                            <div class="border-r border-slate-100"></div><div class="border-r border-slate-100"></div><div class="border-r border-slate-100"></div><div class="border-r border-slate-100"></div><div class="border-r border-slate-100"></div><div></div>
+                                        </div>
+                                        <!-- Animated transit corridor path -->
+                                        <svg class="absolute inset-0 h-full w-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M 20,40 Q 150,120 300,60 T 550,120" fill="none" stroke="#059669" stroke-width="2" stroke-dasharray="5,5" class="opacity-30"></path>
+                                        </svg>
+                                        <div id="mapMarkersContainer" class="absolute inset-0"></div>
+                                        <p class="text-slate-500 text-xs italic z-10 pointer-events-none">Visual tracker simulation matches current telemetry coordinate inputs.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fleet Log Ledger -->
+                            <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm space-y-4">
+                                <h3 class="font-bold text-lg text-slate-100 flex items-center justify-between">
+                                    <span class="flex items-center space-x-2">
+                                        <i class="fa-solid fa-list-ol"></i>
+                                        <span>Fleet Diagnostics & Odometer Audit Logs</span>
+                                    </span>
+                                    <span class="text-xs text-slate-400 font-normal">Auto-refreshing</span>
+                                </h3>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-xs">
+                                        <thead>
+                                            <tr class="border-b border-brand-600 text-slate-400 uppercase tracking-widest text-[10px]">
+                                                <th class="py-3 px-4">Vehicle / Driver</th>
+                                                <th class="py-3 px-4">Status</th>
+                                                <th class="py-3 px-4">Odometer</th>
+                                                <th class="py-3 px-4">Live Speed</th>
+                                                <th class="py-3 px-4">Fuel</th>
+                                                <th class="py-3 px-4 text-right">Last Transmit</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="telemetryTableBody" class="divide-y divide-brand-600/40">
+                                            <!-- Telemetry items list -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Side: Analytics, Fuel Allocations, & Custom Charts -->
+                        <div class="space-y-6">
+                            <!-- Fuel Consumption Analytics Charts -->
+                            <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm space-y-4">
+                                <h3 class="font-bold text-sm text-emerald-300 uppercase tracking-wider flex items-center space-x-2">
+                                    <i class="fa-solid fa-chart-simple"></i>
+                                    <span>Fleet Fuel & Expense Distribution</span>
+                                </h3>
+                                <p class="text-xs text-slate-400">Total liters consumed vs budget allocations per regional cluster.</p>
+
+                                <!-- Interactive SVG Chart -->
+                                <div class="p-4 bg-brand-900/40 rounded-xl border border-brand-600/50 flex flex-col items-center">
+                                    <svg class="w-full h-32" viewBox="0 0 300 100" xmlns="http://www.w3.org/2000/svg">
+                                        <!-- Axis lines -->
+                                        <line x1="20" y1="10" x2="20" y2="90" stroke="#475569" stroke-width="1.5"></line>
+                                        <line x1="20" y1="90" x2="280" y2="90" stroke="#475569" stroke-width="1.5"></line>
+                                        <!-- Grid lines -->
+                                        <line x1="20" y1="50" x2="280" y2="50" stroke="#334155" stroke-dasharray="2,2"></line>
+                                        <line x1="20" y1="20" x2="280" y2="20" stroke="#334155" stroke-dasharray="2,2"></line>
+
+                                        <!-- Bar 1 (Nairobi) -->
+                                        <rect id="chartBarNairobi" x="40" y="30" width="25" height="60" fill="#059669" rx="2" class="transition-all duration-500 hover:opacity-80"></rect>
+                                        <text x="52.5" y="98" fill="#94a3b8" font-size="8" text-anchor="middle">NBI</text>
+                                        <text id="chartValNairobi" x="52.5" y="25" fill="#ffffff" font-size="7" font-weight="bold" text-anchor="middle">450L</text>
+
+                                        <!-- Bar 2 (Mombasa) -->
+                                        <rect id="chartBarMombasa" x="110" y="50" width="25" height="40" fill="#0ea5e9" rx="2" class="transition-all duration-500 hover:opacity-80"></rect>
+                                        <text x="122.5" y="98" fill="#94a3b8" font-size="8" text-anchor="middle">MSA</text>
+                                        <text id="chartValMombasa" x="122.5" y="45" fill="#ffffff" font-size="7" font-weight="bold" text-anchor="middle">280L</text>
+
+                                        <!-- Bar 3 (Kisumu) -->
+                                        <rect id="chartBarKisumu" x="180" y="70" width="25" height="20" fill="#eab308" rx="2" class="transition-all duration-500 hover:opacity-80"></rect>
+                                        <text x="192.5" y="98" fill="#94a3b8" font-size="8" text-anchor="middle">KIS</text>
+                                        <text id="chartValKisumu" x="192.5" y="65" fill="#ffffff" font-size="7" font-weight="bold" text-anchor="middle">120L</text>
+
+                                        <!-- Bar 4 (Budget Reserve) -->
+                                        <rect id="chartBarReserve" x="250" y="40" width="25" height="50" fill="#6366f1" rx="2" class="transition-all duration-500 hover:opacity-80"></rect>
+                                        <text x="262.5" y="98" fill="#94a3b8" font-size="8" text-anchor="middle">RES</text>
+                                        <text id="chartValReserve" x="262.5" y="35" fill="#ffffff" font-size="7" font-weight="bold" text-anchor="middle">350L</text>
+                                    </svg>
+                                    <div class="mt-2 grid grid-cols-4 gap-2 text-[9px] text-slate-400 w-full text-center font-semibold">
+                                        <div><span class="inline-block w-2 h-2 bg-emerald-500 rounded-sm mr-1"></span>Nairobi</div>
+                                        <div><span class="inline-block w-2 h-2 bg-sky-500 rounded-sm mr-1"></span>Mombasa</div>
+                                        <div><span class="inline-block w-2 h-2 bg-yellow-500 rounded-sm mr-1"></span>Kisumu</div>
+                                        <div><span class="inline-block w-2 h-2 bg-indigo-500 rounded-sm mr-1"></span>Reserve</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Finance & Manager Fuel Reimbursements -->
+                            <div class="bg-brand-500 rounded-xl border border-brand-600 p-6 shadow-sm space-y-4">
+                                <h3 class="font-bold text-sm text-amber-300 uppercase tracking-wider flex items-center space-x-2">
+                                    <i class="fa-solid fa-gas-pump"></i>
+                                    <span>Fuel Allowance Claims &amp; Approvals</span>
+                                </h3>
+                                <div class="space-y-3" id="fuelAllowancesContainer">
+                                    <!-- Dynamic fuel allowance items and forms -->
+                                    <div class="p-3 bg-brand-900/40 rounded-lg border border-brand-600/30 text-xs space-y-2">
+                                        <div class="flex justify-between items-center">
+                                            <span class="font-bold text-white">Claim #FL-9081 - David Tech</span>
+                                            <span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[9px] text-amber-400">Pending Review</span>
+                                        </div>
+                                        <p class="text-slate-400 text-[11px]">Route: Nairobi North Area Dispatch. Mileage: 145 Km. Estimated fuel usage: 14.5 Liters.</p>
+                                        <div class="flex justify-between items-center text-[11px] border-t border-brand-600/40 pt-2 text-slate-300">
+                                            <span>Req. Amount: <b>2,320 KES</b></span>
+                                            <div id="fuelActionBtns" class="flex gap-1.5">
+                                                <button onclick="approveFuelClaim('9081', 'Approved')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2 py-1 rounded text-[10px]">Approve</button>
+                                                <button onclick="approveFuelClaim('9081', 'Rejected')" class="bg-rose-600 hover:bg-rose-500 text-white font-bold px-2 py-1 rounded text-[10px]">Reject</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Fuel submit claim form for technicians -->
+                                    <div id="techFuelClaimForm" class="hidden p-3 bg-brand-900/40 rounded-lg border border-brand-600/30 text-xs space-y-3">
+                                        <h4 class="font-bold text-xs text-emerald-400 flex items-center gap-1"><i class="fa-solid fa-file-invoice-dollar"></i> Request Fuel Expense Reinbursement</h4>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-slate-400 mb-1">Litres Requested</label>
+                                            <input type="number" id="claimLitres" value="15" class="w-full bg-brand-500 border border-brand-600 rounded px-2.5 py-1.5 text-slate-100 text-xs focus:outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-slate-400 mb-1">Receipt Attachment Number</label>
+                                            <input type="text" id="claimReceipt" value="REC-FUEL-5612" class="w-full bg-brand-500 border border-brand-600 rounded px-2.5 py-1.5 text-slate-100 text-xs focus:outline-none">
+                                        </div>
+                                        <button onclick="submitFuelClaim()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-1.5 rounded transition">Submit Claim</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
     <!-- REGISTER TENANT MODAL -->
     <div id="registerModal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in">
@@ -1330,22 +1614,11 @@ const htmlContent = `
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Password (min. 8 characters)</label>
-                <input type="password" id="regPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none" oninput="validatePasswordStrength('regPassword', 'regPass')">
-                <div id="regPassChecklist" class="mt-1.5 p-1.5 bg-brand-950/40 rounded border border-brand-600/30 space-y-1 text-[11px]">
-                    <div id="regPassLength"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">At least 8 characters</span></div>
-                    <div id="regPassUpper"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One uppercase letter</span></div>
-                    <div id="regPassLower"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One lowercase letter</span></div>
-                    <div id="regPassDigit"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One digit (0-9)</span></div>
-                    <div id="regPassSpecial"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One special character (!@#$%^&* etc.)</span></div>
-                </div>
+                <input type="password" id="regPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Working Region</label>
-                <select id="regRegion" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
-                    <option value="Nairobi">Nairobi</option>
-                    <option value="Mombasa">Mombasa</option>
-                    <option value="Kisumu">Kisumu</option>
-                </select>
+                <input type="text" id="regRegion" placeholder="Mombasa" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
 
             <div class="pt-2 border-t border-brand-600 space-y-2">
@@ -1444,11 +1717,7 @@ const htmlContent = `
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-[11px] font-bold text-slate-400 mb-1">Working Region</label>
-                        <select id="inviteRegion" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
-                            <option value="Nairobi">Nairobi</option>
-                            <option value="Mombasa">Mombasa</option>
-                            <option value="Kisumu">Kisumu</option>
-                        </select>
+                        <input type="text" id="inviteRegion" placeholder="Nairobi" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-slate-200 focus:outline-none">
                     </div>
                     <div>
                         <label class="block text-[11px] font-bold text-slate-400 mb-1">Assign Reporting Manager</label>
@@ -1537,14 +1806,7 @@ const htmlContent = `
             </div>
             <div>
                 <label class="block text-xs text-slate-400 font-bold mb-1">Enter New Password</label>
-                <input type="password" id="resetModalNewPassword" placeholder="e.g. ksh8890" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none" oninput="validatePasswordStrength('resetModalNewPassword', 'resetPass')">
-                <div id="resetPassChecklist" class="mt-1.5 p-1.5 bg-brand-950/40 rounded border border-brand-600/30 space-y-1 text-[11px]">
-                    <div id="resetPassLength"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">At least 8 characters</span></div>
-                    <div id="resetPassUpper"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One uppercase letter</span></div>
-                    <div id="resetPassLower"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One lowercase letter</span></div>
-                    <div id="resetPassDigit"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One digit (0-9)</span></div>
-                    <div id="resetPassSpecial"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One special character (!@#$%^&* etc.)</span></div>
-                </div>
+                <input type="password" id="resetModalNewPassword" placeholder="e.g. ksh8890" required class="w-full bg-brand-900 border border-brand-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none">
             </div>
             <div class="flex space-x-2 pt-2 justify-end">
                 <button onclick="closePasswordResetModal()" class="bg-brand-900 hover:bg-brand-600 text-slate-300 text-xs py-2 px-4 rounded font-bold">
@@ -1585,28 +1847,6 @@ const htmlContent = `
     </div>
 
     <script>
-        function validatePasswordStrength(inputId, prefix) {
-            const val = document.getElementById(inputId).value;
-            const criteria = {
-                Length: { ok: val.length >= 8, txt: "At least 8 characters" },
-                Upper: { ok: /[A-Z]/.test(val), txt: "One uppercase letter" },
-                Lower: { ok: /[a-z]/.test(val), txt: "One lowercase letter" },
-                Digit: { ok: /[0-9]/.test(val), txt: "One digit (0-9)" },
-                Special: { ok: /[^A-Za-z0-9]/.test(val), txt: "One special character (!@#$%^&* etc.)" }
-            };
-
-            for (const key in criteria) {
-                const el = document.getElementById(prefix + key);
-                if (!el) continue;
-                const item = criteria[key];
-                if (item.ok) {
-                    el.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i> <span class="text-emerald-400">' + item.txt + '</span>';
-                } else {
-                    el.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">' + item.txt + '</span>';
-                }
-            }
-        }
-
         let currentState = {};
         let currentHeaders = {};
         let currentUser = {};
@@ -1797,7 +2037,7 @@ const htmlContent = `
         function switchModuleView(viewName) {
             activeView = viewName;
 
-            const views = ['dashboard', 'inventory', 'finance', 'tasks', 'customers', 'users', 'rbac'];
+            const views = ['dashboard', 'inventory', 'finance', 'tasks', 'customers', 'users', 'rbac', 'telematics'];
             views.forEach(v => {
                 const el = document.getElementById('view_' + v);
                 if (el) el.classList.add('hidden');
@@ -1816,6 +2056,7 @@ const htmlContent = `
             if (viewName === 'inventory') title = 'Inventory Serial Tracking';
             else if (viewName === 'finance') title = 'Finance &amp; M-Pesa payments';
             else if (viewName === 'tasks') title = 'Field Materials &amp; Timesheets';
+            else if (viewName === 'telematics') title = 'Fleet Telematics &amp; GPS Logs';
             else if (viewName === 'customers') title = 'Customer relationship (CRM)';
             else if (viewName === 'users') title = 'Personnel &amp; Key Directory';
             else if (viewName === 'rbac') title = 'RBAC Policy Engine';
@@ -2000,6 +2241,7 @@ const htmlContent = `
                 { id: 'inventory', label: 'Inventory Control', icon: 'fa-boxes-stacked', perm: 'inventory:read' },
                 { id: 'finance', label: 'Finance & Payments', icon: 'fa-file-invoice-dollar', perm: 'finance:read' },
                 { id: 'tasks', label: 'Tasks & Requisitions', icon: 'fa-list-check', perm: 'tasks:read' },
+                { id: 'telematics', label: 'Telematics Desk', icon: 'fa-satellite-dish' },
                 { id: 'customers', label: 'Customer CRM', icon: 'fa-users', perm: 'users:*' },
                 { id: 'users', label: 'Personnel Profiles', icon: 'fa-user-gear', perm: 'users:*' },
                 { id: 'rbac', label: 'RBAC Policy Config', icon: 'fa-shield-halved', perm: 'users:*' }
@@ -2391,16 +2633,10 @@ const htmlContent = `
                     }
 
                     // Role assignment select dropdown
-                    const roleFriendlyNames = {
-                        'field_technician': 'Field Technician',
-                        'manager': 'Reporting Manager',
-                        'finance_officer': 'Finance Officer',
-                        'tenant_admin': 'Tenant Administrator'
-                    };
                     let roleSelect = '<select onchange="updateTeammateRole(\'' + u.id + '\', this.value)" class="bg-brand-900 border border-brand-600 rounded text-xs px-2 py-1 text-slate-200 focus:outline-none">';
                     ['field_technician', 'manager', 'finance_officer', 'tenant_admin'].forEach(r => {
                         const isSelected = r === u.role_name ? 'selected' : '';
-                        roleSelect += '<option value="' + r + '" ' + isSelected + '>' + (roleFriendlyNames[r] || r) + '</option>';
+                        roleSelect += '<option value="' + r + '" ' + isSelected + '>' + r + '</option>';
                     });
                     roleSelect += '</select>';
 
@@ -2432,15 +2668,9 @@ const htmlContent = `
                         const statusColor = inv.status === 'Pending' ? 'text-amber-400' : 'text-emerald-400';
                         const activationUrl = window.location.origin + '/activate.html?token=' + inv.token + '&tenant_id=' + inv.tenant_id + '&role_assignment_id=' + inv.role_name;
 
-                        const roleFriendlyNames = {
-                            'field_technician': 'Field Technician',
-                            'manager': 'Reporting Manager',
-                            'finance_officer': 'Finance Officer',
-                            'tenant_admin': 'Tenant Administrator'
-                        };
                         tr.innerHTML = '<td class="py-2 px-3">' + inv.email + '</td>' +
                             '<td class="py-2 px-3 font-semibold text-white">' + inv.name + '</td>' +
-                            '<td class="py-2 px-3"><span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[10px]">' + (roleFriendlyNames[inv.role_name] || inv.role_name) + '</span></td>' +
+                            '<td class="py-2 px-3"><span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[10px]">' + inv.role_name + '</span></td>' +
                             '<td class="py-2 px-3">' + inv.region + '</td>' +
                             '<td class="py-2 px-3 ' + statusColor + '">' + inv.status + '</td>' +
                             '<td class="py-2 px-3 text-right">' +
@@ -2453,6 +2683,7 @@ const htmlContent = `
 
             // Render Visual Tree Organogram
             renderOrgTree();
+            renderTelematics();
         }
 
         async function createInventoryItem(e) {
@@ -2981,6 +3212,301 @@ const htmlContent = `
             }
         }
 
+        // Telematics state and claims
+        let mockFuelClaims = [
+            { id: '9081', user: 'David Tech', litres: 14.5, amount: 2320, route: 'Nairobi North Area Dispatch', status: 'Pending Review' }
+        ];
+
+        function renderTelematics() {
+            const activeTenant = currentUser.tenant_id;
+            const activeRole = currentUser.role_name;
+
+            // 1. Role-based panel visibility
+            const formTech = document.getElementById('telFormTechnician');
+            const formAdmin = document.getElementById('telFormAdmin');
+            const techFuelForm = document.getElementById('techFuelClaimForm');
+
+            if (formTech && formAdmin && techFuelForm) {
+                if (activeRole === 'field_technician') {
+                    formTech.classList.remove('hidden');
+                    techFuelForm.classList.remove('hidden');
+                    formAdmin.classList.add('hidden');
+                } else {
+                    formAdmin.classList.remove('hidden');
+                    formTech.classList.add('hidden');
+                    techFuelForm.classList.add('hidden');
+                }
+            }
+
+            // 2. Populate Simulator Driver dropdown
+            const driverSelect = document.getElementById('telAdminDriver');
+            if (driverSelect) {
+                const prevVal = driverSelect.value;
+                driverSelect.innerHTML = '';
+                const activeTeammates = Object.values(currentState.users || {}).filter(u => u.tenant_id === activeTenant);
+                activeTeammates.forEach(u => {
+                    const opt = document.createElement('option');
+                    opt.value = u.id;
+                    opt.text = u.name + ' (' + (u.role_name === 'field_technician' ? 'Technician' : u.role_name) + ')';
+                    driverSelect.appendChild(opt);
+                });
+                if (prevVal) driverSelect.value = prevVal;
+            }
+
+            // 3. Render Diagnostics Ledger
+            const telBody = document.getElementById('telemetryTableBody');
+            const markersContainer = document.getElementById('mapMarkersContainer');
+            if (telBody) {
+                telBody.innerHTML = '';
+                if (markersContainer) markersContainer.innerHTML = '';
+
+                const activeTel = Object.values(currentState.telemetry || {}).filter(t => t.tenant_id === activeTenant);
+
+                let totalVehicles = activeTel.length;
+                let totalMileage = 0;
+                let fuelSum = 0;
+                let speedAlerts = 0;
+
+                if (totalVehicles === 0) {
+                    telBody.innerHTML = '<tr><td colspan="6" class="p-3 text-slate-500 italic text-center">No telemetry logs found for this workspace. Use the simulators above to register fleet signals.</td></tr>';
+
+                    // Fallback visual mock values for dashboard rendering
+                    document.getElementById('telematicsStatVehicles').textContent = "0";
+                    document.getElementById('telematicsStatMileage').textContent = "0.0";
+                    document.getElementById('telematicsStatFuel').textContent = "0%";
+                    document.getElementById('telematicsStatAlerts').textContent = "0";
+                } else {
+                    activeTel.forEach(t => {
+                        totalMileage += t.odometer;
+                        fuelSum += t.fuel_level;
+                        if (t.speed > 100) speedAlerts++;
+
+                        const uObj = currentState.users[t.user_id] || { name: 'Unknown User' };
+
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-brand-600 transition';
+
+                        // Status coloring badge
+                        let statusBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-brand-900 border border-brand-600 text-slate-400 font-bold">' + t.status + '</span>';
+                        if (t.status === 'Active') {
+                            statusBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-950 border border-emerald-600 text-emerald-400 font-bold animate-pulse">On-Trip</span>';
+                        } else if (t.status === 'Idle') {
+                            statusBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-950 border border-amber-600 text-amber-400 font-bold">Idle</span>';
+                        }
+
+                        // Speed alert cell
+                        const speedColor = t.speed > 100 ? 'text-rose-400 font-bold' : 'text-slate-300';
+                        const speedWarning = t.speed > 100 ? ' <i class="fa-solid fa-triangle-exclamation text-rose-500 animate-bounce"></i>' : '';
+
+                        // Fuel bar percentage
+                        const fuelColor = t.fuel_level < 20 ? 'bg-rose-500' : (t.fuel_level < 50 ? 'bg-amber-500' : 'bg-emerald-500');
+                        const fuelBar = '<div class="flex items-center gap-2">' +
+                            '<span class="font-semibold">' + Math.round(t.fuel_level) + '%</span>' +
+                            '<div class="w-12 bg-brand-900 h-1.5 rounded-full overflow-hidden border border-brand-600">' +
+                                '<div class="' + fuelColor + ' h-full" style="width: ' + t.fuel_level + '%"></div>' +
+                            '</div>' +
+                        '</div>';
+
+                        tr.innerHTML = '<td class="py-3 px-4 font-semibold text-white">' +
+                                '<div class="font-bold">' + t.vehicle_name + '</div>' +
+                                '<div class="text-[10px] text-slate-400">' + uObj.name + '</div>' +
+                            '</td>' +
+                            '<td class="py-3 px-4">' + statusBadge + '</td>' +
+                            '<td class="py-3 px-4 font-mono text-slate-300">' + t.odometer.toFixed(1) + ' Km</td>' +
+                            '<td class="py-3 px-4 ' + speedColor + '">' + t.speed.toFixed(0) + ' km/h' + speedWarning + '</td>' +
+                            '<td class="py-3 px-4">' + fuelBar + '</td>' +
+                            '<td class="py-3 px-4 text-right text-slate-400">' + new Date(t.created_at).toLocaleTimeString() + '</td>';
+
+                        telBody.appendChild(tr);
+
+                        // Render animated GPS marker on visual map
+                        if (markersContainer) {
+                            // Map coordinates to simulated percentage placements
+                            const leftPct = Math.max(10, Math.min(90, ((t.longitude - 36.0) / 4.0) * 80 + 10));
+                            const topPct = Math.max(10, Math.min(90, (1.0 - ((t.latitude - (-1.2)) / -3.0)) * 80 + 10));
+
+                            const marker = document.createElement('div');
+                            marker.className = 'absolute h-3 w-3 rounded-full border border-white shadow-lg cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all duration-700';
+                            let markerColor = 'bg-sky-500';
+                            if (t.status === 'Active') markerColor = 'bg-emerald-400 animate-pulse';
+                            else if (t.status === 'Idle') markerColor = 'bg-amber-400';
+                            marker.classList.add(markerColor);
+                            marker.style.left = leftPct + '%';
+                            marker.style.top = topPct + '%';
+                            marker.title = t.vehicle_name + ' (' + uObj.name + ') - ' + t.speed + ' km/h';
+
+                            markersContainer.appendChild(marker);
+                        }
+                    });
+
+                    // Update live stat cards
+                    document.getElementById('telematicsStatVehicles').textContent = totalVehicles;
+                    document.getElementById('telematicsStatMileage').textContent = totalMileage.toFixed(1);
+                    document.getElementById('telematicsStatFuel').textContent = Math.round(fuelSum / totalVehicles) + "%";
+                    document.getElementById('telematicsStatAlerts').textContent = speedAlerts;
+
+                    // Update regional SVG charts dynamically based on active telemetry count
+                    const chartBarNairobi = document.getElementById('chartBarNairobi');
+                    const chartValNairobi = document.getElementById('chartValNairobi');
+                    if (chartBarNairobi && chartValNairobi) {
+                        const fuelNbi = Math.min(100, Math.max(20, totalMileage / 100));
+                        chartBarNairobi.setAttribute('height', fuelNbi);
+                        chartBarNairobi.setAttribute('y', 90 - fuelNbi);
+                        chartValNairobi.setAttribute('y', 85 - fuelNbi);
+                        chartValNairobi.textContent = Math.round(fuelNbi * 5) + "L";
+                    }
+                }
+            }
+
+            // 4. Render Fuel Allowance Claims list
+            renderFuelClaims();
+        }
+
+        function renderFuelClaims() {
+            const container = document.getElementById('fuelAllowancesContainer');
+            if (!container) return;
+
+            let html = '';
+            mockFuelClaims.forEach(claim => {
+                let badgeColor = 'text-amber-400';
+                if (claim.status === 'Approved') badgeColor = 'text-emerald-400 font-bold';
+                else if (claim.status === 'Rejected') badgeColor = 'text-rose-400 font-semibold';
+
+                let actionHtml = '';
+                if (claim.status === 'Pending Review' && currentUser.role_name !== 'field_technician') {
+                    actionHtml = '<div class="flex gap-1.5">' +
+                        '<button onclick="approveFuelClaim(\'' + claim.id + '\', \'Approved\')" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2 py-1 rounded text-[10px]">Approve</button>' +
+                        '<button onclick="approveFuelClaim(\'' + claim.id + '\', \'Rejected\')" class="bg-rose-600 hover:bg-rose-500 text-white font-bold px-2 py-1 rounded text-[10px]">Reject</button>' +
+                    '</div>';
+                }
+
+                html += '<div class="p-3 bg-brand-900/40 rounded-lg border border-brand-600/30 text-xs space-y-2">' +
+                    '<div class="flex justify-between items-center">' +
+                        '<span class="font-bold text-white">Claim #' + claim.id + ' - ' + claim.user + '</span>' +
+                        '<span class="px-1.5 py-0.5 bg-brand-900 border border-brand-600 rounded text-[9px] ' + badgeColor + '">' + claim.status + '</span>' +
+                    '</div>' +
+                    '<p class="text-slate-400 text-[11px]">' + claim.route + '. Litres: ' + claim.litres + 'L.</p>' +
+                    '<div class="flex justify-between items-center text-[11px] border-t border-brand-600/40 pt-2 text-slate-300">' +
+                        '<span>Req. Amount: <b>' + claim.amount.toLocaleString() + ' KES</b></span>' +
+                        actionHtml +
+                    '</div>' +
+                '</div>';
+            });
+
+            // Append input form if field technician
+            if (currentUser.role_name === 'field_technician') {
+                const formEl = document.getElementById('techFuelClaimForm');
+                if (formEl) {
+                    formEl.classList.remove('hidden');
+                }
+            }
+
+            container.innerHTML = html;
+        }
+
+        async function submitTelemetry(e) {
+            e.preventDefault();
+            const vehicle = document.getElementById('telTechVehicleName').value;
+            const odometer = parseFloat(document.getElementById('telTechOdometer').value);
+            const speed = parseFloat(document.getElementById('telTechSpeed').value);
+            const fuel = parseFloat(document.getElementById('telTechFuel').value);
+
+            const lat = -1.2921 + (Math.random() - 0.5) * 0.1;
+            const lng = 36.8219 + (Math.random() - 0.5) * 0.1;
+
+            const payload = {
+                vehicle_name: vehicle,
+                odometer: odometer,
+                latitude: lat,
+                longitude: lng,
+                speed: speed,
+                fuel_level: fuel,
+                status: speed > 0 ? 'Active' : 'Parked'
+            };
+
+            try {
+                const res = await fetch('/api/telematics/ping', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    pushNotification('TELEMETRY_UPDATED', 'Telemetry log published successfully!');
+                    await fetchState();
+                } else {
+                    alert('Failed to update telemetry');
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function submitTelemetryAdmin(e) {
+            e.preventDefault();
+            const driverId = document.getElementById('telAdminDriver').value;
+            const vehicle = document.getElementById('telAdminVehicleName').value;
+            const odometer = parseFloat(document.getElementById('telAdminOdometer').value);
+            const speed = parseFloat(document.getElementById('telAdminSpeed').value);
+            const fuel = parseFloat(document.getElementById('telAdminFuel').value);
+            const status = document.getElementById('telAdminStatus').value;
+
+            const lat = -4.0435 + (Math.random() - 0.5) * 0.1;
+            const lng = 39.6682 + (Math.random() - 0.5) * 0.1;
+
+            const payload = {
+                vehicle_name: vehicle,
+                odometer: odometer,
+                latitude: lat,
+                longitude: lng,
+                speed: speed,
+                fuel_level: fuel,
+                status: status
+            };
+
+            try {
+                const res = await fetch('/api/telematics/ping', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    pushNotification('SIMULATION_PING', 'Simulated telemetry broadcast dispatched.');
+                    await fetchState();
+                } else {
+                    alert('Simulation broadcast failed');
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function submitFuelClaim() {
+            const litres = parseFloat(document.getElementById('claimLitres').value);
+            const receipt = document.getElementById('claimReceipt').value;
+            const amount = litres * 160;
+
+            mockFuelClaims.push({
+                id: Math.floor(1000 + Math.random() * 9000).toString(),
+                user: currentUser.name,
+                litres: litres,
+                amount: amount,
+                route: 'Standard Dispatch Route Support (Ref: ' + receipt + ')',
+                status: 'Pending Review'
+            });
+
+            pushNotification('CLAIM_SUBMITTED', 'Fuel claim submitted successfully!');
+            renderFuelClaims();
+        }
+
+        function approveFuelClaim(claimId, status) {
+            const claim = mockFuelClaims.find(c => c.id === claimId);
+            if (claim) {
+                claim.status = status;
+                pushNotification('CLAIM_MUTATED', 'Fuel Claim #' + claimId + ' ' + status);
+                renderFuelClaims();
+            }
+        }
+
         function renderOrgTree() {
             const activeTenant = currentUser.tenant_id;
             const allUsers = Object.values(currentState.users || {}).filter(u => u.tenant_id === activeTenant);
@@ -3144,14 +3670,7 @@ const activationHtmlContent = `
         <form onsubmit="handleActivation(event)" class="space-y-4">
             <div>
                 <label class="block text-xs font-bold text-slate-400 mb-1">Choose Password (min. 8 chars)</label>
-                <input type="password" id="actPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400" oninput="validatePasswordStrength('actPassword', 'actPass')">
-                <div id="actPassChecklist" class="mt-2 p-2 bg-brand-950/40 rounded border border-brand-600/30 space-y-1 text-[11px]">
-                    <div id="actPassLength"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">At least 8 characters</span></div>
-                    <div id="actPassUpper"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One uppercase letter</span></div>
-                    <div id="actPassLower"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One lowercase letter</span></div>
-                    <div id="actPassDigit"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One digit (0-9)</span></div>
-                    <div id="actPassSpecial"><i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">One special character (!@#$%^&* etc.)</span></div>
-                </div>
+                <input type="password" id="actPassword" placeholder="••••••••" required minlength="8" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400">
             </div>
             <div>
                 <label class="block text-xs font-bold text-slate-400 mb-1">Confirm Password</label>
@@ -3170,39 +3689,10 @@ const activationHtmlContent = `
     </div>
 
     <script>
-        function validatePasswordStrength(inputId, prefix) {
-            const val = document.getElementById(inputId).value;
-            const criteria = {
-                Length: { ok: val.length >= 8, txt: "At least 8 characters" },
-                Upper: { ok: /[A-Z]/.test(val), txt: "One uppercase letter" },
-                Lower: { ok: /[a-z]/.test(val), txt: "One lowercase letter" },
-                Digit: { ok: /[0-9]/.test(val), txt: "One digit (0-9)" },
-                Special: { ok: /[^A-Za-z0-9]/.test(val), txt: "One special character (!@#$%^&* etc.)" }
-            };
-
-            for (const key in criteria) {
-                const el = document.getElementById(prefix + key);
-                if (!el) continue;
-                const item = criteria[key];
-                if (item.ok) {
-                    el.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i> <span class="text-emerald-400">' + item.txt + '</span>';
-                } else {
-                    el.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-500"></i> <span class="text-slate-400">' + item.txt + '</span>';
-                }
-            }
-        }
-
         const params = new URLSearchParams(window.location.search);
         const token = params.get('token');
         const urlTenant = params.get('tenant_id');
         const urlRole = params.get('role_assignment_id');
-
-        const roleFriendlyNames = {
-            'field_technician': 'Field Technician',
-            'manager': 'Reporting Manager',
-            'finance_officer': 'Finance Officer',
-            'tenant_admin': 'Tenant Administrator'
-        };
 
         async function loadInvitationPreview() {
             if (!token) {
@@ -3212,7 +3702,7 @@ const activationHtmlContent = `
 
             // Fill standard values from URL as quick fallback
             document.getElementById('previewTenant').textContent = urlTenant || "SME Tenant";
-            document.getElementById('previewRole').textContent = roleFriendlyNames[urlRole] || urlRole || "Field Technician";
+            document.getElementById('previewRole').textContent = urlRole || "field_technician";
 
             try {
                 const res = await fetch('/api/invite/preview?token=' + encodeURIComponent(token));
@@ -3220,7 +3710,7 @@ const activationHtmlContent = `
                     const data = await res.json();
                     document.getElementById('previewName').textContent = data.name;
                     document.getElementById('previewTenant').textContent = data.tenant_id;
-                    document.getElementById('previewRole').textContent = roleFriendlyNames[data.role_name] || data.role_name;
+                    document.getElementById('previewRole').textContent = data.role_name;
                 } else {
                     document.getElementById('previewName').textContent = "Invited Colleague";
                 }
