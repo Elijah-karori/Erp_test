@@ -114,3 +114,26 @@ func ModuleClearanceMiddleware(database *db.Database, requiredPermission string)
 		}
 	}
 }
+
+// AnyModuleClearanceMiddleware authorizes a route when the caller holds at least
+// one of the supplied permissions. Useful for shared governance endpoints where
+// different operational modules use the same workflow control plane.
+func AnyModuleClearanceMiddleware(database *db.Database, requiredPermissions ...string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			rolesStr, ok := c.Get(ContextRoles).(string)
+			if !ok {
+				return echo.NewHTTPError(http.StatusForbidden, "Missing or invalid roles in context")
+			}
+			tenantID, _ := c.Get(ContextTenantID).(string)
+			for _, roleName := range strings.Split(rolesStr, ",") {
+				for _, permission := range requiredPermissions {
+					if database.CheckPermission(tenantID, strings.TrimSpace(roleName), permission) {
+						return next(c)
+					}
+				}
+			}
+			return echo.NewHTTPError(http.StatusForbidden, "Access denied: governance permission required")
+		}
+	}
+}

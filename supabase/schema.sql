@@ -120,11 +120,13 @@ create table inventory_items (
     -- Added for the "robust inventory" pass — not in the original in-memory
     -- model, needed for reorder alerts.
     reorder_threshold int not null default 0,
+    unit_cost numeric(14,2) not null default 0,
     created_at    timestamptz not null default now(),
     unique (tenant_id, serial_number)
 );
 create index idx_inventory_tenant on inventory_items(tenant_id);
 create index idx_inventory_status on inventory_items(tenant_id, status);
+
 
 -- ============================================================
 -- MATERIAL REQUESTS & PROCUREMENT
@@ -140,6 +142,15 @@ create table material_requests (
     created_at   timestamptz not null default now()
 );
 create index idx_material_requests_tenant on material_requests(tenant_id);
+create table if not exists inventory_reservations (
+    id text primary key, tenant_id text not null references tenants(id) on delete cascade,
+    request_id text not null references material_requests(id) on delete cascade,
+    item_id text not null references inventory_items(id) on delete restrict,
+    reserved_for text not null references users(id), status text not null default 'RESERVED',
+    created_at timestamptz not null default now(),
+    unique (tenant_id, request_id), unique (tenant_id, item_id, status)
+);
+create index if not exists idx_inventory_reservations_tenant on inventory_reservations(tenant_id, status);
 
 create table procurement_orders (
     id            text primary key,
@@ -237,6 +248,8 @@ alter table customers enable row level security;
 alter table customers force row level security;
 alter table inventory_items enable row level security;
 alter table inventory_items force row level security;
+alter table inventory_reservations enable row level security;
+alter table inventory_reservations force row level security;
 alter table material_requests enable row level security;
 alter table material_requests force row level security;
 alter table procurement_orders enable row level security;
@@ -262,6 +275,9 @@ create policy tenant_isolation on roles             using (tenant_id = current_s
 create policy tenant_isolation on users             using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on customers         using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on inventory_items    using (tenant_id = current_setting('app.current_tenant_id', true));
+drop policy if exists inventory_reservation_tenant_isolation on inventory_reservations;
+drop policy if exists tenant_isolation_inventory_reservations on inventory_reservations;
+create policy inventory_reservation_tenant_isolation on inventory_reservations using (tenant_id = current_setting('app.current_tenant_id', true)) with check (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on material_requests  using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on procurement_orders using (tenant_id = current_setting('app.current_tenant_id', true));
 create policy tenant_isolation on invoices          using (tenant_id = current_setting('app.current_tenant_id', true));
@@ -356,3 +372,89 @@ create index idx_invoice_notes_tenant on invoice_notes(tenant_id);
 alter table invoice_notes enable row level security;
 alter table invoice_notes force row level security;
 create policy tenant_isolation on invoice_notes using (tenant_id = current_setting('app.current_tenant_id', true));
+
+
+alter table payments add column if not exists workflow_id text;
+alter table inbox_messages add column if not exists locked_at timestamptz;
+alter table inbox_messages add column if not exists completed_at timestamptz;
+
+
+alter table outbox_events enable row level security;
+alter table outbox_events force row level security;
+drop policy if exists outbox_tenant_isolation on outbox_events;
+create policy outbox_tenant_isolation on outbox_events using (tenant_id = current_setting('app.current_tenant_id', true)) with check (tenant_id = current_setting('app.current_tenant_id', true));
+alter table inbox_messages enable row level security;
+alter table inbox_messages force row level security;
+drop policy if exists inbox_tenant_isolation on inbox_messages;
+create policy inbox_tenant_isolation on inbox_messages using (tenant_id = current_setting('app.current_tenant_id', true)) with check (tenant_id = current_setting('app.current_tenant_id', true));
+
+-- ============================================================
+-- BUSINESS TRANSACTION LEDGER / PROFITABILITY
+-- ============================================================
+create table if not exists business_ledger_entries (
+    id text primary key,
+    tenant_id text not null references tenants(id) on delete cascade,
+    transaction_id text not null,
+    task_id text references tasks(id) on delete set null,
+    invoice_id text references invoices(id) on delete set null,
+    entity_type text not null,
+    entity_id text not null,
+    account text not null,
+    entry_type text not null,
+    amount numeric(14,2) not null,
+    quantity numeric(14,4) not null default 1,
+    unit_cost numeric(14,2) not null default 0,
+    currency char(3) not null default 'KES',
+    reference text,
+    actor_id text,
+    reversal_of text references business_ledger_entries(id),
+    created_at timestamptz not null default now(),
+    unique (tenant_id, transaction_id, entry_type, account)
+);
+create index if not exists idx_ledger_tenant_task on business_ledger_entries(tenant_id, task_id, created_at desc);
+create index if not exists idx_ledger_tenant_invoice on business_ledger_entries(tenant_id, invoice_id, created_at desc);
+create index if not exists idx_ledger_transaction on business_ledger_entries(tenant_id, transaction_id);
+alter table business_ledger_entries enable row level security;
+alter table business_ledger_entries force row level security;
+drop policy if exists ledger_tenant_isolation on business_ledger_entries;
+create policy ledger_tenant_isolation on business_ledger_entries using (tenant_id = current_setting('app.current_tenant_id', true)) with check (tenant_id = current_setting('app.current_tenant_id', true));
+
+create table if not exists labor_rates (
+    id text primary key,
+    tenant_id text not null references tenants(id) on delete cascade,
+    user_id text references users(id) on delete cascade,
+    role_name text,
+    hourly_rate numeric(14,2) not null,
+    currency char(3) not null default 'KES',
+    active boolean not null default true,
+    created_at timestamptz not null default now()
+);
+create index if not exists idx_labor_rates_lookup on labor_rates(tenant_id, user_id, role_name, active);
+alter table labor_rates enable row level security;
+alter table labor_rates force row level security;
+drop policy if exists labor_rates_tenant_isolation on labor_rates;
+create policy labor_rates_tenant_isolation on labor_rates using (tenant_id = current_setting('app.current_tenant_id', true)) with check (tenant_id = current_setting('app.current_tenant_id', true));
+
+
+-- ============================================================
+-- FIELD SERVICE TELEMETRY (v13)
+-- ============================================================
+create table if not exists field_attendance (
+ id text primary key, tenant_id text not null references tenants(id) on delete cascade,
+ user_id text not null references users(id), clock_in_at timestamptz not null,
+ clock_in_lat numeric(10,7) not null, clock_in_lon numeric(10,7) not null,
+ clock_in_photo_url text not null, clock_out_at timestamptz,
+ clock_out_lat numeric(10,7), clock_out_lon numeric(10,7), clock_out_photo_url text,
+ status text not null default 'OPEN', created_at timestamptz not null default now()
+);
+create index if not exists idx_field_attendance_tenant_user on field_attendance(tenant_id,user_id,clock_in_at desc);
+create unique index if not exists ux_field_attendance_open_user on field_attendance(tenant_id,user_id) where status='OPEN';
+create table if not exists field_job_events (
+ id text primary key, tenant_id text not null references tenants(id) on delete cascade,
+ project_id text references projects(id) on delete cascade, task_id text references tasks(id) on delete cascade,
+ technician_id text not null references users(id), event_type text not null,
+ occurred_at timestamptz not null default now(), latitude numeric(10,7), longitude numeric(10,7),
+ photo_url text, customer_signature_url text, note text, created_at timestamptz not null default now()
+);
+create index if not exists idx_field_job_events_tenant_time on field_job_events(tenant_id,occurred_at desc);
+create index if not exists idx_field_job_events_task on field_job_events(tenant_id,task_id,occurred_at desc);

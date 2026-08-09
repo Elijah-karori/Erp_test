@@ -2,12 +2,13 @@ package consumer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -50,6 +51,35 @@ func StartERPProcessors(ctx context.Context, nc *nats.Conn, database *db.Databas
 	return nil
 }
 
+func inboxMessageID(msg jetstream.Msg) string {
+	if id := msg.Headers().Get("Nats-Msg-Id"); id != "" {
+		return id
+	}
+	if id := msg.Headers().Get("X-ERP-Trace-ID"); id != "" {
+		return id
+	}
+	h := sha256.Sum256(append([]byte(msg.Subject()+":"), msg.Data()...))
+	return hex.EncodeToString(h[:])
+}
+
+func claimInbox(database *db.Database, msg jetstream.Msg, consumerName, tenantID string) (func(), bool) {
+	id := inboxMessageID(msg)
+	claimed, err := database.ClaimInbox(context.Background(), consumerName, id, tenantID, msg.Subject())
+	if err != nil {
+		log.Printf("INBOX %s: failed to claim %s: %v", consumerName, id, err)
+		return nil, false
+	}
+	if !claimed {
+		return func() { msg.Ack() }, true
+	}
+	return func() {
+		if err := database.CompleteInbox(context.Background(), id); err != nil {
+			log.Printf("INBOX %s: failed to complete %s: %v", consumerName, id, err)
+		}
+		msg.Ack()
+	}, true
+}
+
 func publishSecurityAlert(nc *nats.Conn, tenantID, userID, reason, violation string) {
 	alert := types.AuditAlert{
 		UserID:    userID,
@@ -74,6 +104,11 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 		if tenantID == "" || userID == "" {
 			log.Printf("INVENTORY: Rejecting message lacking Tenant or User header.")
 			msg.Term()
+			return
+		}
+		ack, ok := claimInbox(database, msg, "InventoryWorker", tenantID)
+		if !ok {
+			msg.Nak()
 			return
 		}
 
@@ -106,7 +141,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 			})
 			log.Printf("INVENTORY: Created serialized item %s under Tenant %s", itemID, tenantID)
 			sdb.Log(tenantID, userID, "CreateItem_Success", fmt.Sprintf("Asset %s (SN: %s) created in SQLite", cmd.Name, cmd.SerialNumber))
-			msg.Ack()
+			ack()
 
 		case "erp.inventory.item.cmd.assign":
 			var cmd types.AssignDeviceCommand
@@ -148,7 +183,7 @@ func consumeInventory(cons jetstream.Consumer, js jetstream.JetStream, database 
 
 			log.Printf("INVENTORY: Serialized asset %s allocated to tech %s under tenant %s", item.ID, cmd.UserID, tenantID)
 			sdb.Log(tenantID, userID, "AssignItem_Success", fmt.Sprintf("Asset %s allocated to tech %s", cmd.ItemID, cmd.UserID))
-			msg.Ack()
+			ack()
 
 		default:
 			log.Printf("INVENTORY: Received unrecognized subject %s. Terminating.", subject)
@@ -168,6 +203,11 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 
 		if tenantID == "" || userID == "" {
 			msg.Term()
+			return
+		}
+		ack, ok := claimInbox(database, msg, "FinanceWorker", tenantID)
+		if !ok {
+			msg.Nak()
 			return
 		}
 
@@ -205,7 +245,16 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 				Reference:     cmd.Reference,
 				Date:          time.Now(),
 			}
-			database.SavePayment(payment)
+			inserted, err := database.SavePaymentIdempotent(payment)
+			if err != nil {
+				msg.Term()
+				return
+			}
+			if !inserted {
+				// Same tenant/reference was already applied. Redelivery is safe.
+				ack()
+				return
+			}
 
 			// Update Invoice (Partial payments & immediate confirmation alerts) via thread-safe transaction
 			updatedInv, err := database.ApplyPaymentTransaction(cmd.InvoiceID, cmd.Amount)
@@ -222,7 +271,7 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 
 			// Fast confirmation event trigger to customer
 			publishImmediateSMSConfirmation(tenantID, updatedInv.CustomerID, cmd.Amount, updatedInv.BalanceAmount)
-			msg.Ack()
+			ack()
 
 		case "erp.customers.crm.cmd.create":
 			var cmd types.CreateCustomerCommand
@@ -233,7 +282,7 @@ func consumeFinance(cons jetstream.Consumer, js jetstream.JetStream, database *d
 
 			database.CreateCustomerTransaction(cmd.ID, tenantID, cmd.Name, cmd.Phone, cmd.Email)
 			sdb.Log(tenantID, userID, "CreateCustomer_Success", fmt.Sprintf("Customer %s registered under tenant %s", cmd.Name, tenantID))
-			msg.Ack()
+			ack()
 		}
 	})
 	if err != nil {
@@ -249,6 +298,11 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 
 		if tenantID == "" || userID == "" {
 			msg.Term()
+			return
+		}
+		ack, ok := claimInbox(database, msg, "TaskTimesheetWorker", tenantID)
+		if !ok {
+			msg.Nak()
 			return
 		}
 
@@ -335,7 +389,7 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 				}
 			}
 
-			msg.Ack()
+			ack()
 
 		case "erp.users.auth.cmd.reset_password":
 			var cmd types.ResetPasswordCommand
@@ -350,57 +404,34 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 				return
 			}
 			sdb.Log(tenantID, userID, "ResetPassword_Success", fmt.Sprintf("Credential password reset for user %s executed in SQLite", cmd.UserID))
-			msg.Ack()
+			ack()
 
-		case "erp.tasks.materials.cmd.request":
-			var cmd types.SubmitMaterialRequestCommand
+		case "erp.tasks.materials.cmd.fulfill":
+			var cmd types.FulfillMaterialRequestCommand
 			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
 				msg.Term()
 				return
 			}
-
-			reqID := "req_" + uuid.New().String()[:8]
-			database.CreateMaterialRequestTransaction(reqID, tenantID, cmd.TaskID, userID, cmd.ItemName)
-			sdb.Log(tenantID, userID, "MaterialRequest_Success", fmt.Sprintf("Technician material request %s logged", reqID))
-			msg.Ack()
-
-		case "erp.tasks.materials.cmd.approve":
-			var cmd types.ApproveMaterialCommand
-			if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
+			if cmd.RequestID == "" || cmd.ItemName == "" || cmd.RequesterID == "" {
 				msg.Term()
 				return
 			}
-
-			updatedReq, procOrder, err := database.ApproveMaterialRequestTransaction(cmd.RequestID, tenantID, userID)
+			// The workflow executor is the governance boundary. The business
+			// transaction below is atomic: allocate a serialized item or create
+			// the procurement escalation, then write the invoice usage note.
+			updatedReq, procOrder, err := database.FulfillMaterialRequestTransaction(context.Background(), tenantID, cmd, userID)
 			if err != nil {
-				msg.Term()
+				log.Printf("TASKS: governed material fulfillment failed: %v", err)
+				_ = database.FailInbox(context.Background(), inboxMessageID(msg), err)
+				msg.Nak()
 				return
 			}
-
 			if procOrder != nil {
-				sdb.Log(tenantID, userID, "MaterialApproval_ProcurementEscalation", fmt.Sprintf("Material %s out of stock. Requisition escalated to Procurement order %s", updatedReq.ItemName, procOrder.ID))
+				sdb.Log(tenantID, userID, "Material_Fulfillment_Procurement", fmt.Sprintf("Material %s escalated to procurement order %s", updatedReq.ItemName, procOrder.ID))
 			} else {
-				sdb.Log(tenantID, userID, "MaterialApproval_Fulfilled", fmt.Sprintf("Material approved and serial asset %s issued automatically", updatedReq.AllocatedSN))
+				sdb.Log(tenantID, userID, "Material_Fulfilled", fmt.Sprintf("Request %s allocated serialized unit %s", updatedReq.ID, updatedReq.AllocatedSN))
 			}
-
-			// Trigger approval email for materials
-			if emailSvc != nil {
-				reqUser, errUser := database.GetUser(updatedReq.RequesterID)
-				leadUser, _ := database.GetUser(userID)
-				if errUser == nil && reqUser != nil {
-					leadName := "Team Lead"
-					if leadUser != nil {
-						leadName = leadUser.Name
-					}
-					statusStr := "Approved (Fulfilled with SN: " + updatedReq.AllocatedSN + ")"
-					if procOrder != nil {
-						statusStr = "Escalated to Procurement (Out of stock)"
-					}
-					_ = emailSvc.SendApprovalNotification(reqUser.Email, leadName, "Material Request", cmd.RequestID, statusStr)
-				}
-			}
-
-			msg.Ack()
+			ack()
 
 		case "erp.tasks.task.cmd.create":
 			var cmd types.CreateTaskCommand
@@ -437,7 +468,7 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			})
 			log.Printf("TASKS: Created task %s under Tenant %s", cmd.ID, tenantID)
 			sdb.Log(tenantID, userID, "CreateTask_Success", fmt.Sprintf("Task %s created in SQLite", cmd.Title))
-			msg.Ack()
+			ack()
 
 		case "erp.tasks.task.cmd.update_status":
 			var cmd types.UpdateTaskStatusCommand
@@ -476,7 +507,7 @@ func consumeTasks(cons jetstream.Consumer, js jetstream.JetStream, database *db.
 			database.SaveTask(task)
 			log.Printf("TASKS: Updated task %s status to %s", task.ID, cmd.Status)
 			sdb.Log(tenantID, userID, "UpdateTaskStatus_Success", fmt.Sprintf("Updated task %s status to %s", task.ID, cmd.Status))
-			msg.Ack()
+			ack()
 		}
 	})
 	if err != nil {

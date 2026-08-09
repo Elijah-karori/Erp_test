@@ -596,7 +596,7 @@ const htmlContent = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SME Kenya ERP Event Bus Console</title>
+    <title>ERP Command Center</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script>
@@ -616,7 +616,182 @@ const htmlContent = `
             }
         }
     </script>
-</head>
+
+<style id="erp-premium-ui">
+:root{--erp-bg:#07110f;--erp-panel:#0d1c19;--erp-panel2:#10231f;--erp-border:rgba(148,163,184,.13);--erp-muted:#91a5a0;--erp-accent:#34d399;--erp-blue:#60a5fa;--erp-amber:#fbbf24;--erp-danger:#fb7185;}
+*{scrollbar-width:thin;scrollbar-color:#29413b transparent}
+body{background:radial-gradient(circle at 12% -5%,rgba(52,211,153,.10),transparent 28%),radial-gradient(circle at 92% 0%,rgba(96,165,250,.08),transparent 24%),var(--erp-bg)!important}
+#dashboardApp{background:transparent!important}
+#dashboardApp .bg-brand-500{background:linear-gradient(145deg,rgba(13,28,25,.96),rgba(10,23,20,.96))!important;border-color:var(--erp-border)!important;box-shadow:0 12px 36px rgba(0,0,0,.18)!important}
+#dashboardApp .bg-brand-600{background:rgba(16,35,31,.92)!important;border-color:var(--erp-border)!important}
+#dashboardApp .bg-brand-900{background:rgba(5,15,13,.88)!important}
+#dashboardApp header{backdrop-filter:blur(16px);background:rgba(7,17,15,.82)!important;border-color:var(--erp-border)!important}
+#sidebarDrawer{backdrop-filter:blur(18px);background:rgba(10,23,20,.93)!important;border-color:var(--erp-border)!important}
+#sidebarDrawer button{transition:all .18s ease}
+#sidebarDrawer button:hover{transform:translateX(2px)}
+#erpCommandBar{position:sticky;top:0;z-index:35;backdrop-filter:blur(18px);background:rgba(7,17,15,.82);border-bottom:1px solid var(--erp-border);box-shadow:0 8px 30px rgba(0,0,0,.16)}
+.erp-command-inner{max-width:1180px;margin:auto;padding:10px 16px;display:flex;gap:10px;align-items:center}
+.erp-search{flex:1;min-width:150px;position:relative}.erp-search input{width:100%;background:rgba(5,15,13,.8);border:1px solid var(--erp-border);border-radius:11px;padding:10px 42px 10px 38px;color:#e5eeeb;font-size:13px;outline:none}.erp-search input:focus{border-color:rgba(52,211,153,.55);box-shadow:0 0 0 3px rgba(52,211,153,.08)}.erp-search i{position:absolute;left:13px;top:12px;color:#6f8780}.erp-kbd{position:absolute;right:10px;top:8px;border:1px solid var(--erp-border);border-radius:6px;padding:2px 6px;font-size:10px;color:#70847f}
+.erp-action{border:1px solid var(--erp-border);background:rgba(16,35,31,.8);color:#dbe7e3;border-radius:10px;padding:9px 11px;font-size:12px;font-weight:700;display:flex;gap:7px;align-items:center;white-space:nowrap;transition:.18s}.erp-action:hover{border-color:rgba(52,211,153,.45);background:rgba(20,48,41,.95);transform:translateY(-1px)}.erp-action.primary{background:linear-gradient(135deg,#059669,#047857);border-color:rgba(110,231,183,.25);color:white}
+.erp-chip{font-size:10px;padding:4px 7px;border-radius:999px;border:1px solid var(--erp-border);color:#a7b9b4;background:rgba(255,255,255,.025)}
+#erpSearchResults{position:absolute;left:0;right:0;top:46px;background:#0b1916;border:1px solid var(--erp-border);border-radius:13px;box-shadow:0 20px 50px rgba(0,0,0,.4);overflow:hidden;display:none;max-height:360px;overflow-y:auto}.erp-result{padding:11px 13px;border-bottom:1px solid var(--erp-border);cursor:pointer}.erp-result:hover{background:rgba(52,211,153,.08)}.erp-result-title{font-size:12px;font-weight:800;color:#eef7f4}.erp-result-meta{font-size:10px;color:#7f9791;margin-top:3px}
+.erp-work{display:grid;grid-template-columns:1.45fr .85fr;gap:16px}.erp-work-panel{border:1px solid var(--erp-border);border-radius:16px;background:linear-gradient(145deg,rgba(13,28,25,.98),rgba(8,19,17,.96));overflow:hidden}.erp-work-head{padding:15px 17px;border-bottom:1px solid var(--erp-border);display:flex;justify-content:space-between;align-items:center}.erp-work-title{font-size:14px;font-weight:800;color:#eef7f4;display:flex;align-items:center;gap:8px}.erp-work-body{padding:10px}.erp-task-row{display:flex;gap:12px;align-items:center;padding:12px;border-radius:11px;border:1px solid transparent;transition:.15s}.erp-task-row:hover{background:rgba(255,255,255,.025);border-color:var(--erp-border)}.erp-task-main{min-width:0;flex:1}.erp-task-title{font-size:12px;font-weight:750;color:#e6f0ed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.erp-task-meta{font-size:10px;color:#7f9791;margin-top:4px}.erp-status{font-size:9px;font-weight:800;border-radius:999px;padding:4px 7px;border:1px solid var(--erp-border)}.erp-status.pending{color:#fcd34d;background:rgba(251,191,36,.08)}.erp-status.progress{color:#93c5fd;background:rgba(96,165,250,.08)}.erp-status.done{color:#6ee7b7;background:rgba(52,211,153,.08)}.erp-mini-btn{border:1px solid var(--erp-border);background:transparent;color:#9db0ab;border-radius:8px;padding:5px 7px;font-size:10px}.erp-mini-btn:hover{color:#fff;border-color:rgba(52,211,153,.45)}
+.erp-kpi-accent{position:relative;overflow:hidden}.erp-kpi-accent:after{content:'';position:absolute;width:100px;height:100px;right:-35px;top:-35px;border-radius:50%;background:rgba(52,211,153,.06)}
+#erpToastStack{position:fixed;right:18px;bottom:18px;z-index:100;display:flex;flex-direction:column;gap:8px;width:min(360px,calc(100vw - 36px))}.erp-toast{border:1px solid var(--erp-border);background:rgba(10,23,20,.96);backdrop-filter:blur(18px);box-shadow:0 18px 45px rgba(0,0,0,.35);border-radius:13px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;animation:erpIn .2s ease}.erp-toast.ok{border-color:rgba(52,211,153,.28)}.erp-toast.err{border-color:rgba(251,113,133,.28)}.erp-toast-title{font-size:11px;font-weight:800;color:#f2f7f5}.erp-toast-msg{font-size:10px;color:#9db0ab;margin-top:3px;line-height:1.45}@keyframes erpIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+#erpQuickTaskModal{z-index:90}.erp-modal-backdrop{background:rgba(0,0,0,.66);backdrop-filter:blur(7px)}
+#erpApprovalCenter{border:1px solid var(--erp-border);border-radius:18px;background:linear-gradient(145deg,rgba(12,27,23,.98),rgba(6,16,14,.96));overflow:hidden;box-shadow:0 16px 45px rgba(0,0,0,.2)}
+.erp-approval-head{padding:18px;display:flex;justify-content:space-between;gap:16px;align-items:center;border-bottom:1px solid var(--erp-border)}
+.erp-approval-kicker{font-size:9px;letter-spacing:.16em;font-weight:900;color:#fbbf24}.erp-approval-title{font-size:18px;font-weight:850;color:#f2f7f5;margin-top:4px}.erp-approval-sub{font-size:10px;color:#819791;margin-top:4px}
+.erp-approval-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--erp-border);border-bottom:1px solid var(--erp-border)}
+.erp-approval-kpi{background:rgba(9,21,18,.96);padding:14px}.erp-approval-kpi b{display:block;font-size:21px;color:#f2f7f5}.erp-approval-kpi span{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#78908a}.erp-approval-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px}.erp-approval-card{border:1px solid var(--erp-border);border-radius:14px;background:rgba(7,18,15,.72);overflow:hidden}.erp-approval-card-head{padding:12px 13px;border-bottom:1px solid var(--erp-border);display:flex;align-items:center;justify-content:space-between}.erp-approval-card-title{font-size:11px;font-weight:850;color:#e8f1ee}.erp-approval-count{font-size:9px;font-weight:850;border-radius:999px;padding:3px 7px;background:rgba(251,191,36,.08);color:#fcd34d;border:1px solid rgba(251,191,36,.18)}.erp-approval-row{padding:11px 13px;border-bottom:1px solid rgba(148,163,184,.08);display:flex;gap:10px;align-items:center}.erp-approval-row:last-child{border-bottom:0}.erp-approval-main{flex:1;min-width:0}.erp-approval-id{font:700 10px ui-monospace,SFMono-Regular,monospace;color:#91aaa3}.erp-approval-item{font-size:11px;font-weight:750;color:#e8f1ee;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.erp-approval-meta{font-size:9px;color:#718680;margin-top:3px}.erp-approval-action{border:1px solid rgba(52,211,153,.22);background:rgba(5,150,105,.13);color:#6ee7b7;border-radius:8px;padding:6px 8px;font-size:9px;font-weight:850;white-space:nowrap}.erp-approval-action:hover{background:rgba(5,150,105,.25)}.erp-approval-action.secondary{border-color:var(--erp-border);background:transparent;color:#a8b9b4}.erp-approval-empty{padding:18px;text-align:center;font-size:10px;color:#667b75}
+@media(max-width:800px){.erp-approval-kpis{grid-template-columns:repeat(2,1fr)}.erp-approval-grid{grid-template-columns:1fr}.erp-approval-head{align-items:flex-start;flex-direction:column}}
+
+
+.erp-task-center{border:1px solid var(--erp-border);border-radius:18px;background:linear-gradient(145deg,rgba(11,26,22,.98),rgba(6,16,14,.96));overflow:hidden;box-shadow:0 16px 45px rgba(0,0,0,.18)}
+.erp-task-center-head{padding:18px 18px 14px;display:flex;justify-content:space-between;gap:16px;align-items:center;border-bottom:1px solid var(--erp-border)}
+.erp-task-center-kicker{font-size:9px;letter-spacing:.16em;font-weight:900;color:#6ee7b7}.erp-task-center-kicker i{margin-right:5px}
+.erp-task-center-title{font-size:17px;font-weight:850;color:#f2f7f5;margin-top:4px}.erp-task-center-sub{font-size:10px;color:#7f9791;margin-top:4px}
+.erp-task-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--erp-border);border-bottom:1px solid var(--erp-border)}
+.erp-task-kpi{background:rgba(10,22,19,.95);padding:12px 14px}.erp-task-kpi-label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#718780}.erp-task-kpi-value{font-size:19px;font-weight:850;color:#eef7f4;margin-top:3px}.erp-task-kpi-value.risk{color:#fb7185}
+.erp-task-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--erp-border);background:rgba(255,255,255,.015)}
+.erp-task-filters{display:flex;gap:5px;overflow:auto}.erp-task-filter{font-size:10px;font-weight:800;color:#81958f;padding:7px 9px;border:1px solid transparent;border-radius:8px;white-space:nowrap}.erp-task-filter:hover{color:#dce8e4;background:rgba(255,255,255,.03)}.erp-task-filter.active{color:#6ee7b7;background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.2)}
+.erp-task-select{background:#0a1815;color:#cbd8d4;border:1px solid var(--erp-border);border-radius:8px;padding:7px 9px;font-size:10px;outline:none}
+.erp-task-board{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px;background:rgba(0,0,0,.08)}
+.erp-task-lane{min-width:0;background:rgba(255,255,255,.018);border:1px solid var(--erp-border);border-radius:12px;padding:9px}.erp-task-lane-head{display:flex;justify-content:space-between;align-items:center;padding:3px 2px 9px}.erp-task-lane-name{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#9db0ab}.erp-task-count{font-size:9px;border-radius:999px;padding:3px 6px;background:rgba(255,255,255,.04);color:#7f9791}
+.erp-task-card{padding:11px;border:1px solid var(--erp-border);background:rgba(8,19,17,.9);border-radius:10px;margin-bottom:7px;cursor:pointer;transition:.15s}.erp-task-card:hover{border-color:rgba(52,211,153,.3);transform:translateY(-1px);box-shadow:0 9px 22px rgba(0,0,0,.18)}
+.erp-task-card-title{font-size:11px;font-weight:800;color:#e8f1ee;line-height:1.35}.erp-task-card-meta{display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:9px;color:#718780}.erp-task-card-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:9px}.erp-task-risk{font-size:8px;font-weight:900;color:#fb7185;background:rgba(251,113,133,.08);padding:4px 6px;border-radius:999px}.erp-task-due{font-size:9px;color:#9db0ab}.erp-task-person{font-size:9px;color:#8fc7b6;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.erp-task-empty{padding:18px 7px;text-align:center;color:#5f746e;font-size:10px}
+@media(max-width:900px){.erp-task-kpis{grid-template-columns:repeat(2,1fr)}.erp-task-board{grid-template-columns:1fr}.erp-task-center-head{align-items:flex-start;flex-direction:column}.erp-task-toolbar{align-items:stretch;flex-direction:column}.erp-task-select{width:100%}}
+@media(max-width:900px){.erp-work{grid-template-columns:1fr}.erp-command-inner{padding:9px 12px}.erp-action span{display:none}.erp-action{padding:9px}.erp-search{min-width:0}}
+
+.erp-job360{border:1px solid var(--erp-border);border-radius:18px;background:linear-gradient(145deg,rgba(12,28,24,.98),rgba(7,17,15,.97));overflow:hidden}.erp-job360-head{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:16px 18px;border-bottom:1px solid var(--erp-border)}.erp-job360-kicker{font-size:9px;letter-spacing:.16em;font-weight:900;color:#60a5fa}.erp-job360-title{font-size:16px;font-weight:850;color:#f3f7f5;margin-top:3px}.erp-job360-sub{font-size:10px;color:#7f9791;margin-top:4px}.erp-job360-grid{display:grid;grid-template-columns:1.35fr .85fr;gap:1px;background:var(--erp-border)}.erp-job360-main,.erp-job360-side{background:rgba(7,17,15,.94);padding:15px}.erp-job360-main{min-height:180px}.erp-job360-side{display:flex;flex-direction:column;gap:8px}.erp-job360-empty{min-height:150px;display:flex;align-items:center;justify-content:center;text-align:center;color:#5f746e;font-size:10px}.erp-job360-titleline{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.erp-job360-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}.erp-job360-stat{padding:10px;border:1px solid var(--erp-border);border-radius:10px;background:rgba(255,255,255,.018)}.erp-job360-stat b{display:block;font-size:12px;color:#e8f1ee}.erp-job360-stat span{font-size:8px;color:#70847f;text-transform:uppercase;letter-spacing:.08em}.erp-job360-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:1px solid var(--erp-border);border-radius:10px;background:rgba(255,255,255,.018)}.erp-job360-item-label{font-size:9px;color:#718780}.erp-job360-item-value{font-size:10px;font-weight:800;color:#dce8e4;text-align:right}.erp-job360-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}@media(max-width:900px){.erp-job360-grid{grid-template-columns:1fr}.erp-job360-meta{grid-template-columns:1fr 1fr}}
+
+/* v13 UI elevation: unify every existing module into one enterprise workspace */
+html{background:var(--erp-bg)}
+body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.005em}
+button,input,select,textarea{font:inherit}
+#dashboardApp{color:#dce8e4}
+#sidebarDrawer{box-shadow:18px 0 50px rgba(0,0,0,.18)!important}
+#sidebarDrawer nav{padding-top:8px;padding-bottom:12px}
+#sidebarDrawer nav button{min-height:42px;border:1px solid transparent;position:relative}
+#sidebarDrawer nav button:hover{border-color:rgba(148,163,184,.12)!important;background:rgba(255,255,255,.035)!important}
+#sidebarDrawer nav button.bg-emerald-600{background:linear-gradient(135deg,rgba(5,150,105,.95),rgba(4,120,87,.9))!important;box-shadow:0 8px 22px rgba(5,150,105,.16);border-color:rgba(110,231,183,.16)!important}
+#sidebarDrawer nav button.bg-emerald-600:before{content:"";position:absolute;left:-1px;top:8px;bottom:8px;width:3px;border-radius:0 4px 4px 0;background:#6ee7b7}
+#sidebarDrawer .erp-nav-section{padding:16px 10px 7px;font-size:9px;letter-spacing:.16em;text-transform:uppercase;font-weight:900;color:#607a72}
+#erpModuleContext{max-width:1180px;margin:18px auto 0;padding:0 16px;width:100%}
+.erp-context{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border:1px solid var(--erp-border);border-radius:16px;background:linear-gradient(120deg,rgba(16,35,31,.9),rgba(9,20,17,.86));box-shadow:0 12px 32px rgba(0,0,0,.12)}
+.erp-context-left{min-width:0}.erp-breadcrumb{display:flex;gap:7px;align-items:center;font-size:9px;color:#718a83;text-transform:uppercase;letter-spacing:.12em;font-weight:800}.erp-breadcrumb strong{color:#91aaa3}.erp-context-title{font-size:20px;font-weight:900;color:#f4f9f7;margin-top:5px}.erp-context-sub{font-size:11px;color:#819790;margin-top:4px;max-width:760px}.erp-context-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.erp-status-pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--erp-border);border-radius:999px;padding:7px 10px;font-size:9px;font-weight:850;color:#a8bbb6;background:rgba(255,255,255,.025)}.erp-status-pill i{font-size:7px}.erp-context-action{border:1px solid var(--erp-border);background:rgba(255,255,255,.025);color:#c9d8d4;border-radius:9px;padding:8px 10px;font-size:10px;font-weight:800}.erp-context-action:hover{background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.25)}
+#workspacePanels{padding-top:0!important}
+#workspacePanels>div[id^="view_"]>div{scroll-margin-top:80px}
+#dashboardApp .bg-brand-500,#dashboardApp .bg-brand-900{transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}
+#dashboardApp .bg-brand-500:hover{border-color:rgba(148,163,184,.19)!important}
+#dashboardApp form{background:rgba(5,15,13,.46)!important;border-color:var(--erp-border)!important}
+#dashboardApp input,#dashboardApp select,#dashboardApp textarea{background:rgba(4,13,11,.72)!important;border-color:var(--erp-border)!important;border-radius:10px!important;color:#e7f0ed!important;min-height:40px}
+#dashboardApp input:focus,#dashboardApp select:focus,#dashboardApp textarea:focus{border-color:rgba(52,211,153,.5)!important;box-shadow:0 0 0 3px rgba(52,211,153,.07)!important}
+#dashboardApp label{letter-spacing:.01em}
+#dashboardApp table{border-collapse:separate;border-spacing:0}
+#dashboardApp table thead th{font-size:9px;letter-spacing:.1em;font-weight:900;color:#718a83;padding-top:11px;padding-bottom:11px;background:rgba(255,255,255,.015)}
+#dashboardApp table tbody tr{transition:background .14s ease}
+#dashboardApp table tbody tr:hover{background:rgba(52,211,153,.035)!important}
+#dashboardApp table tbody td{border-bottom:1px solid rgba(148,163,184,.07)}
+.erp-dashboard-hero{position:relative;overflow:hidden;border:1px solid var(--erp-border);border-radius:20px;padding:22px;background:radial-gradient(circle at 90% 10%,rgba(52,211,153,.12),transparent 28%),linear-gradient(135deg,rgba(17,39,33,.98),rgba(7,18,15,.98));box-shadow:0 18px 48px rgba(0,0,0,.18)}
+.erp-dashboard-hero:after{content:"";position:absolute;right:-70px;bottom:-90px;width:260px;height:260px;border-radius:50%;border:1px solid rgba(110,231,183,.08);box-shadow:0 0 0 30px rgba(110,231,183,.018),0 0 0 60px rgba(110,231,183,.012)}
+.erp-hero-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:18px;align-items:stretch}.erp-hero-copy{position:relative;z-index:1}.erp-hero-kicker{font-size:9px;letter-spacing:.18em;text-transform:uppercase;font-weight:900;color:#6ee7b7}.erp-hero-title{font-size:30px;line-height:1.08;font-weight:950;color:#f7fbfa;margin-top:7px;max-width:720px}.erp-hero-sub{font-size:12px;line-height:1.65;color:#8fa49e;margin-top:10px;max-width:680px}.erp-hero-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.erp-hero-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;position:relative;z-index:1}.erp-hero-stat{border:1px solid var(--erp-border);background:rgba(4,13,11,.45);border-radius:13px;padding:13px}.erp-hero-stat span{font-size:8px;text-transform:uppercase;letter-spacing:.12em;color:#6f8881;font-weight:900}.erp-hero-stat b{display:block;font-size:21px;color:#f2f8f5;margin-top:5px}.erp-hero-stat small{font-size:9px;color:#70867f}
+.erp-module-empty{border:1px dashed rgba(148,163,184,.16);border-radius:14px;padding:28px;text-align:center;color:#6e847e;background:rgba(255,255,255,.012)}
+@media(max-width:900px){.erp-hero-grid{grid-template-columns:1fr}.erp-context{align-items:flex-start;flex-direction:column}.erp-context-right{justify-content:flex-start}.erp-hero-title{font-size:25px}}
+@media(max-width:640px){#erpModuleContext{margin-top:12px;padding:0 12px}.erp-context{padding:14px}.erp-context-title{font-size:17px}.erp-context-sub{font-size:10px}.erp-hero-title{font-size:22px}.erp-hero-stat-grid{grid-template-columns:1fr 1fr}}
+</style>
+<style>
+.lifecycle-shell{background:linear-gradient(145deg,rgba(20,34,34,.96),rgba(15,23,42,.96));border:1px solid #2b4a4a;border-radius:18px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.18)}
+.lifecycle-pipeline{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px;overflow-x:auto;padding-bottom:4px}.lifecycle-stage{background:#142222;border:1px solid #2b4a4a;border-radius:12px;padding:12px;min-height:78px}.lifecycle-stage b{display:block;font-size:22px;color:#6ee7b7}.lifecycle-stage span{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.12em}.lifecycle-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.lifecycle-card{background:#142222;border:1px solid #2b4a4a;border-radius:14px;padding:16px}.lifecycle-card h4{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:#94a3b8;margin-bottom:12px}.lifecycle-table{width:100%;font-size:11px}.lifecycle-table th{color:#64748b;text-transform:uppercase;font-size:9px;text-align:left;padding:8px;border-bottom:1px solid #2b4a4a}.lifecycle-table td{padding:9px 8px;border-bottom:1px solid rgba(43,74,74,.6)}.lifecycle-input{width:100%;background:#0f1b1b;border:1px solid #2b4a4a;border-radius:9px;padding:9px;color:#e2e8f0;font-size:12px}.lifecycle-btn{background:#059669;color:white;border:0;border-radius:9px;padding:9px 12px;font-size:11px;font-weight:800}.lifecycle-btn:hover{background:#10b981}.lifecycle-chip{display:inline-flex;padding:3px 7px;border-radius:999px;background:rgba(16,185,129,.1);color:#6ee7b7;font-size:9px;font-weight:800;text-transform:uppercase}.lifecycle-metric{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(43,74,74,.5);font-size:11px}.lifecycle-metric:last-child{border-bottom:0}@media(max-width:900px){.lifecycle-pipeline{grid-template-columns:repeat(7,130px)}.lifecycle-grid{grid-template-columns:1fr}}
+</style>
+
+<style>
+/* V16 Drilldown */
+.workspace-click{cursor:pointer;transition:transform .12s ease,background .12s ease,border-color .12s ease}
+.workspace-click:hover{transform:translateY(-1px);border-color:rgba(56,189,248,.38);background:var(--surface-2)}
+.v16-detail-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.v16-detail-card{grid-column:span 4;border:1px solid var(--border);border-radius:14px;padding:14px;background:var(--surface)}
+.v16-detail-card.wide{grid-column:span 8}.v16-detail-card.full{grid-column:1/-1}
+.v16-detail-k{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}
+.v16-detail-v{margin-top:4px;font-weight:700}
+@media(max-width:980px){.v16-detail-card,.v16-detail-card.wide{grid-column:1/-1}}
+</style><style>
+/* V17 Action Center */
+.v17-stepper{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin:14px 0}
+.v17-step{border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center;min-height:70px;background:var(--surface)}
+.v17-step.active{border-color:rgba(245,158,11,.55);box-shadow:0 0 0 1px rgba(245,158,11,.12) inset}
+.v17-step.done{border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.06)}
+.v17-step-number{font-size:10px;font-weight:800;color:var(--muted)}
+.v17-step-title{font-size:11px;font-weight:700;margin-top:5px}
+.v17-action-bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.v17-action-bar button{border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:var(--surface);cursor:pointer}
+.v17-action-bar button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+.v17-exception{border-left:3px solid #f59e0b}
+.v17-exception.danger{border-left-color:#ef4444}
+@media(max-width:900px){.v17-stepper{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style><style>
+/* V18 Mobile Field Mode */
+.v18-field-shell{display:none}
+.v18-field-card{border:1px solid var(--border);border-radius:18px;background:var(--surface);padding:16px}
+.v18-field-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.v18-job-title{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.v18-job-meta{font-size:12px;color:var(--muted);margin-top:4px}
+.v18-progress{height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:12px 0}
+.v18-progress > span{display:block;height:100%;background:var(--primary);border-radius:99px}
+.v18-field-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.v18-field-actions button{min-height:52px;border:1px solid var(--border);border-radius:14px;background:var(--surface);font-weight:700}
+.v18-field-actions button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+.v18-field-action-wide{grid-column:1/-1}
+.v18-field-step{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--border)}
+.v18-field-step:last-child{border-bottom:0}
+.v18-field-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--border);flex:0 0 auto}
+.v18-field-step.done .v18-field-dot{background:#22c55e;border-color:#22c55e}
+.v18-field-step.active .v18-field-dot{background:var(--primary);border-color:var(--primary);box-shadow:0 0 0 4px rgba(59,130,246,.12)}
+@media(max-width:720px){
+  .v18-field-shell{display:block}
+  #v17TechnicianJobFlow,#v17ManagementActions{display:none}
+  .workspace-main{padding:12px}
+  .workspace-header{gap:10px}
+  .workspace-title{font-size:20px}
+  .workspace-actions button{min-height:44px}
+  .v17-stepper{display:none}
+}
+@media(min-width:721px){
+  .v18-field-shell{display:none}
+}
+</style><style>/* V19_EVIDENCE_REVIEW */
+/* V19 Evidence & Completion Review */
+.v19-review{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,.8fr);gap:14px}
+.v19-panel{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:16px}
+.v19-check{display:flex;align-items:flex-start;gap:10px;padding:12px 0;border-bottom:1px solid var(--border)}
+.v19-check:last-child{border-bottom:0}
+.v19-check input{margin-top:3px;width:18px;height:18px}
+.v19-check strong{display:block}
+.v19-check small{display:block;color:var(--muted);margin-top:2px}
+.v19-evidence-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.v19-evidence-item{min-height:90px;border:1px solid var(--border);border-radius:12px;padding:11px;background:var(--surface-2)}
+.v19-evidence-type{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800}
+.v19-signature{min-height:120px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted)}
+.v19-review-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.v19-review-actions button{min-height:48px;border-radius:12px;border:1px solid var(--border);font-weight:750;background:var(--surface)}
+.v19-review-actions .primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+@media(max-width:800px){.v19-review{grid-template-columns:1fr}.v19-evidence-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.v19-evidence-grid{grid-template-columns:1fr}}
+</style><style>
+/* V20_PROFITABILITY_360 */
+.v20-fin-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:14px}
+.v20-fin-card{border:1px solid var(--border);border-radius:14px;padding:13px;background:var(--surface)}
+.v20-fin-k{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800}
+.v20-fin-v{font-size:20px;font-weight:800;margin-top:4px}
+.v20-fin-sub{font-size:11px;color:var(--muted);margin-top:3px}
+.v20-margin{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+.v20-margin span{display:block;height:100%;background:var(--primary)}
+.v20-fin-table{width:100%;border-collapse:collapse}
+.v20-fin-table th,.v20-fin-table td{text-align:left;padding:9px;border-bottom:1px solid var(--border);font-size:12px}
+.v20-fin-table th{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+@media(max-width:950px){.v20-fin-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:600px){.v20-fin-grid{grid-template-columns:1fr 1fr}.v20-fin-scroll{overflow:auto}}
+</style></head>
 <body class="bg-brand-900 text-slate-100 min-h-screen font-sans overflow-x-hidden">
 
     <!-- LOGIN / AUTHENTICATION GATE SCREEN -->
@@ -655,7 +830,23 @@ const htmlContent = `
     </div>
 
     <!-- MAIN CO-LOCATED ERP DASHBOARD VIEW -->
-    <div id="dashboardApp" class="hidden min-h-screen flex flex-col lg:flex-row">
+    <div id="dashboardApp" class="hidden min-h-screen flex flex-col">
+
+        <div id="erpCommandBar">
+            <div class="erp-command-inner">
+                <div class="erp-search">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input id="erpGlobalSearch" type="search" placeholder="Search customers, tasks, assets…" autocomplete="off" oninput="erpGlobalSearch(this.value)" onfocus="erpGlobalSearch(this.value)">
+                    <span class="erp-kbd">Ctrl K</span>
+                    <div id="erpSearchResults"></div>
+                </div>
+                <button class="erp-action primary" onclick="openQuickTaskModal()"><i class="fa-solid fa-plus"></i><span>New Task</span></button>
+                <button class="erp-action" onclick="switchModuleView('inventory');document.getElementById('itemName')?.focus()"><i class="fa-solid fa-cube"></i><span>Asset</span></button>
+                <button class="erp-action" onclick="switchModuleView('finance');document.getElementById('payInvoiceId')?.focus()"><i class="fa-solid fa-money-bill-transfer"></i><span>Payment</span></button>
+                <span id="erpOnlineChip" class="erp-chip"><i class="fa-solid fa-circle text-emerald-400"></i> Live</span>
+            </div>
+        </div>
+
 
         <!-- MOBILE NAVIGATION HEADER -->
         <header class="lg:hidden bg-brand-500 border-b border-brand-600 px-4 py-4 flex items-center justify-between shadow-md sticky top-0 z-50">
@@ -675,8 +866,10 @@ const htmlContent = `
             </div>
         </header>
 
-        <!-- Role-Based Responsive Sidebar Layout -->
-        <aside id="sidebarDrawer" class="hidden lg:flex w-full lg:w-64 bg-brand-500 border-r border-brand-600 flex-col shadow-xl shrink-0 fixed lg:static inset-y-0 left-0 z-40 lg:z-auto transition-transform duration-300 transform lg:transform-none">
+        <!-- Layout Wrapper for Sidebar & Content -->
+        <div class="flex-1 flex flex-col lg:flex-row">
+            <!-- Role-Based Responsive Sidebar Layout -->
+            <aside id="sidebarDrawer" class="hidden lg:flex w-full lg:w-64 bg-brand-500 border-r border-brand-600 flex-col shadow-xl shrink-0 fixed lg:static inset-y-0 left-0 z-40 lg:z-auto transition-transform duration-300 transform lg:transform-none">
 
             <div class="hidden lg:flex px-6 py-5 border-b border-brand-600 items-center justify-between bg-brand-600">
                 <div class="flex items-center space-x-3">
@@ -728,6 +921,21 @@ const htmlContent = `
                 </div>
             </header>
 
+            <div id="erpModuleContext">
+                <div class="erp-context">
+                    <div class="erp-context-left">
+                        <div class="erp-breadcrumb"><span>ERP Command Center</span><i class="fa-solid fa-chevron-right"></i><strong id="erpContextCrumb">Dashboard</strong></div>
+                        <div id="erpContextTitle" class="erp-context-title">Executive Command Center</div>
+                        <div id="erpContextSub" class="erp-context-sub">A unified view of customers, delivery, inventory, governance, finance and field execution.</div>
+                    </div>
+                    <div class="erp-context-right">
+                        <span class="erp-status-pill"><i class="fa-solid fa-circle text-emerald-400"></i><span id="erpContextTenant">Workspace</span></span>
+                        <span class="erp-status-pill"><i class="fa-solid fa-shield-halved text-sky-400"></i> Policy enforced</span>
+                        <button class="erp-context-action" onclick="fetchState()"><i class="fa-solid fa-rotate mr-1"></i>Sync</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Notification Drawer Pane -->
             <div id="notifPane" class="hidden mx-4 lg:mx-8 mt-4 p-4 bg-brand-500 rounded-xl border border-brand-600 shadow-lg space-y-3">
                 <h4 class="text-xs uppercase font-bold text-slate-400 flex items-center justify-between">
@@ -744,8 +952,28 @@ const htmlContent = `
 
                 <!-- Module A: Dashboard View -->
                 <div id="view_dashboard" class="space-y-6">
+                    <section class="erp-dashboard-hero">
+                        <div class="erp-hero-grid">
+                            <div class="erp-hero-copy">
+                                <div class="erp-hero-kicker">Business operating system</div>
+                                <div class="erp-hero-title">Run the business from one operational command center.</div>
+                                <div class="erp-hero-sub">Customers, projects, technicians, inventory, approvals, payments and profitability are already connected. This workspace is the visual control layer for those services.</div>
+                                <div class="erp-hero-actions">
+                                    <button class="erp-action primary" onclick="switchModuleView('lifecycle')"><i class="fa-solid fa-route"></i>Open delivery lifecycle</button>
+                                    <button class="erp-action" onclick="switchModuleView('approvals')"><i class="fa-solid fa-stamp"></i>Review approvals</button>
+                                    <button class="erp-action" onclick="switchModuleView('profitability')"><i class="fa-solid fa-chart-line"></i>View margin</button>
+                                </div>
+                            </div>
+                            <div class="erp-hero-stat-grid">
+                                <div class="erp-hero-stat"><span>Execution</span><b id="heroExecutionStat">—</b><small>Field work state</small></div>
+                                <div class="erp-hero-stat"><span>Governance</span><b id="heroApprovalStat">—</b><small>Items requiring control</small></div>
+                                <div class="erp-hero-stat"><span>Finance</span><b id="heroFinanceStat">—</b><small>Invoice value</small></div>
+                                <div class="erp-hero-stat"><span>Customer</span><b id="heroCustomerStat">—</b><small>Active relationship base</small></div>
+                            </div>
+                        </div>
+                    </section>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
+                        <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md erp-kpi-accent">
                             <div class="flex items-center justify-between text-slate-400">
                                 <span class="text-xs font-bold uppercase">Serialized ONU Inventory</span>
                                 <i class="fa-solid fa-box text-emerald-400"></i>
@@ -753,7 +981,7 @@ const htmlContent = `
                             <h3 id="stat_inventory_cnt" class="text-3xl font-bold mt-2 text-white">3</h3>
                             <p class="text-xs text-slate-300 mt-1">Serialized units stored across regions.</p>
                         </div>
-                        <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
+                        <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md erp-kpi-accent">
                             <div class="flex items-center justify-between text-slate-400">
                                 <span class="text-xs font-bold uppercase">Total Invoiced Amount</span>
                                 <i class="fa-solid fa-money-bill-wave text-amber-400"></i>
@@ -761,13 +989,29 @@ const htmlContent = `
                             <h3 id="stat_finance_val" class="text-3xl font-bold mt-2 text-white">KSh 20,000</h3>
                             <p class="text-xs text-slate-300 mt-1">Total outstanding + paid balances.</p>
                         </div>
-                        <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
+                        <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md erp-kpi-accent">
                             <div class="flex items-center justify-between text-slate-400">
                                 <span class="text-xs font-bold uppercase">Pending Approvals</span>
                                 <i class="fa-solid fa-clock-rotate-left text-sky-400"></i>
                             </div>
                             <h3 id="stat_tasks_cnt" class="text-3xl font-bold mt-2 text-white">1</h3>
                             <p class="text-xs text-slate-300 mt-1">Subordinate timesheets awaiting manager check.</p>
+                        </div>
+                    </div>
+
+
+                    <!-- Premium Work Command Center -->
+                    <div class="erp-work" id="erpWorkCenter">
+                        <div class="erp-work-panel">
+                            <div class="erp-work-head">
+                                <div><div class="erp-work-title"><i class="fa-solid fa-list-check text-emerald-400"></i> Work Queue</div><div class="text-[10px] text-slate-500 mt-1">Live tasks requiring attention</div></div>
+                                <button class="erp-mini-btn" onclick="switchModuleView('tasks')">Open task workspace <i class="fa-solid fa-arrow-right ml-1"></i></button>
+                            </div>
+                            <div id="erpWorkQueue" class="erp-work-body"></div>
+                        </div>
+                        <div class="erp-work-panel">
+                            <div class="erp-work-head"><div><div class="erp-work-title"><i class="fa-solid fa-bolt text-amber-400"></i> Command Health</div><div class="text-[10px] text-slate-500 mt-1">Operational signals</div></div></div>
+                            <div id="erpHealthPanel" class="erp-work-body space-y-2"></div>
                         </div>
                     </div>
 
@@ -816,7 +1060,44 @@ const htmlContent = `
                     </div>
                 </div>
 
+                <!-- Governance & Approval Center -->
+                <div id="view_approvals" class="hidden space-y-6">
+                    <div id="erpApprovalCenter">
+                        <div class="erp-approval-head">
+                            <div>
+                                <div class="erp-approval-kicker"><i class="fa-solid fa-shield-check"></i> MAKER → CHECKER → EXECUTE → RECONCILE</div>
+                                <div class="erp-approval-title">Governance &amp; Approval Center</div>
+                                <div class="erp-approval-sub">One control surface for operational approvals, procurement receipt confirmation and billing reconciliation. Actions remain tenant, role and region constrained by the backend.</div>
+                            </div>
+                            <button class="erp-action" onclick="fetchState();renderApprovalCenter()"><i class="fa-solid fa-rotate"></i><span>Refresh Queue</span></button>
+                        </div>
+                        <div id="erpApprovalKpis" class="erp-approval-kpis"></div>
+                        <div id="erpApprovalGrid" class="erp-approval-grid"></div>
+                    </div>
+                    <div class="bg-brand-500 rounded-xl border border-brand-600 p-5">
+                        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400 mb-3"><i class="fa-solid fa-route text-emerald-400"></i> Control lifecycle</div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                            <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-amber-300 font-black text-sm">01</div><div class="text-xs font-bold mt-1">Requested</div><div class="text-[9px] text-slate-500 mt-1">Maker creates the request</div></div>
+                            <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-sky-300 font-black text-sm">02</div><div class="text-xs font-bold mt-1">Checked</div><div class="text-[9px] text-slate-500 mt-1">Authorized checker validates</div></div>
+                            <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-emerald-300 font-black text-sm">03</div><div class="text-xs font-bold mt-1">Executed</div><div class="text-[9px] text-slate-500 mt-1">Command goes through JetStream</div></div>
+                            <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-violet-300 font-black text-sm">04</div><div class="text-xs font-bold mt-1">Reconciled</div><div class="text-[9px] text-slate-500 mt-1">Evidence closes the control loop</div></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Module B: Inventory View -->
+                <div id="view_profitability" class="hidden space-y-6">
+                    <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md">
+                        <div class="flex items-center justify-between mb-5">
+                            <div><h3 class="font-bold text-lg text-emerald-300"><i class="fa-solid fa-chart-pie mr-2"></i>Business Profitability</h3><p class="text-xs text-slate-400 mt-1">Job-level revenue, material cost, labour cost and realized margin.</p></div>
+                            <button onclick="renderProfitability()" class="erp-mini-btn"><i class="fa-solid fa-rotate mr-1"></i>Refresh</button>
+                        </div>
+                        <div id="profitabilityKpis" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
+                        <div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr class="border-b border-brand-600 text-slate-400 uppercase"><th class="py-3">Job</th><th>Revenue</th><th>Material</th><th>Labour</th><th>Margin</th><th>Margin %</th></tr></thead><tbody id="profitabilityRows"></tbody></table></div>
+                    </div>
+                    <div class="bg-brand-500 p-6 rounded-xl border border-brand-600 shadow-md"><h3 class="font-bold text-sm text-slate-200 mb-3">Immutable Transaction Ledger</h3><div id="ledgerRows" class="space-y-2"></div></div>
+                </div>
+
                 <div id="view_inventory" class="hidden space-y-6">
                     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <div class="bg-brand-500 rounded-xl border border-brand-600 p-4">
@@ -1076,6 +1357,44 @@ const htmlContent = `
                             <span id="tasksHeaderBadge" class="text-xs text-slate-400 uppercase tracking-widest">HIERARCHICAL REQUISITIONS</span>
                         </div>
 
+                        <!-- Operational Task Command Board -->
+                        <div id="taskCommandBoard" class="erp-task-center mb-6">
+                            <div class="erp-task-center-head">
+                                <div>
+                                    <div class="erp-task-center-kicker"><i class="fa-solid fa-bolt"></i> OPERATIONS CONTROL</div>
+                                    <h4 class="erp-task-center-title">Task &amp; Delivery Command Board</h4>
+                                    <p class="erp-task-center-sub">Prioritize field work, dependencies, SLA risk and technician workload from one operational surface.</p>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="openQuickTaskModal()" class="erp-action primary"><i class="fa-solid fa-plus"></i><span>New Task</span></button>
+                                </div>
+                            </div>
+                            <div id="erpTaskKpis" class="erp-task-kpis"></div>
+                            <div class="erp-task-toolbar">
+                                <div class="erp-task-filters">
+                                    <button class="erp-task-filter active" data-filter="all" onclick="setERPTaskFilter('all',this)">All</button>
+                                    <button class="erp-task-filter" data-filter="Pending" onclick="setERPTaskFilter('Pending',this)">Queued</button>
+                                    <button class="erp-task-filter" data-filter="In_Progress" onclick="setERPTaskFilter('In_Progress',this)">In progress</button>
+                                    <button class="erp-task-filter" data-filter="risk" onclick="setERPTaskFilter('risk',this)">At risk</button>
+                                    <button class="erp-task-filter" data-filter="Completed" onclick="setERPTaskFilter('Completed',this)">Completed</button>
+                                </div>
+                                <select id="erpTaskAssigneeFilter" onchange="renderERPTaskCenter()" class="erp-task-select">
+                                    <option value="">All technicians</option>
+                                </select>
+                            </div>
+                            <div id="erpTaskBoard" class="erp-task-board"></div>
+                        </div>
+
+
+                        <!-- Task / Job 360 operational workspace -->
+                        <div id="erpJob360" class="erp-job360 mb-6">
+                            <div class="erp-job360-head">
+                                <div><div class="erp-job360-kicker"><i class="fa-solid fa-crosshairs"></i> EXECUTION CONTEXT</div><div class="erp-job360-title">Job 360 Workspace</div><div class="erp-job360-sub">Select any task to see its delivery chain: customer, technician, materials, timesheet, asset and payment state.</div></div>
+                                <button class="erp-mini-btn" onclick="erpClearJob360()"><i class="fa-solid fa-xmark mr-1"></i>Clear</button>
+                            </div>
+                            <div id="erpJob360Body" class="erp-job360-grid"><div class="erp-job360-empty">Select a task from the command board to open its operational context.</div></div>
+                        </div>
+
                         <!-- Active material requests panel -->
                         <div class="bg-brand-900 border border-brand-600 rounded-xl p-4 space-y-3 mb-6">
                             <h4 class="font-bold text-xs uppercase text-slate-400">Hardware / Routers Material Requests</h4>
@@ -1206,7 +1525,123 @@ const htmlContent = `
                     </div>
                 </div>
 
-                <!-- Module F: User Directory & Visual Team Hierarchy -->
+                <!-- Module F: Customer / Project Lifecycle -->
+                <div id="view_lifecycle" class="hidden space-y-6">
+                    <div class="lifecycle-shell">
+                        <section id="fieldServiceIntelligenceSection" class="bg-brand-800 border border-brand-600 rounded-2xl p-5 mb-5 shadow-xl">
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5"><div><div class="text-[10px] uppercase tracking-[.18em] text-amber-400 font-bold">OPERATIONS → MARGIN</div><h3 class="text-xl font-bold text-white">Field-Service Intelligence</h3><p class="text-xs text-slate-400 mt-1">Workload, SLA exposure, regional delivery, material leakage and customer voice from the same ERP records.</p></div><button class="lifecycle-btn" onclick="fetchState()"><i class="fa-solid fa-rotate mr-1"></i> Refresh intelligence</button></div>
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-[10px] uppercase text-slate-500">Open jobs</div><div id="fsiOpen" class="text-2xl font-black text-white">0</div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-[10px] uppercase text-slate-500">Overdue</div><div id="fsiOverdue" class="text-2xl font-black text-rose-300">0</div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-[10px] uppercase text-slate-500">SLA risk</div><div id="fsiSla" class="text-2xl font-black text-amber-300">0</div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-[10px] uppercase text-slate-500">Completion</div><div id="fsiCompletion" class="text-2xl font-black text-emerald-300">0%</div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-[10px] uppercase text-slate-500">Gross margin</div><div id="fsiMargin" class="text-2xl font-black text-sky-300">KES 0</div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><div class="text-[10px] uppercase text-slate-500">Customer voice</div><div id="fsiCsat" class="text-2xl font-black text-violet-300">0/5</div></div>
+  </div>
+  <div class="grid lg:grid-cols-4 gap-4">
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><h4 class="text-xs uppercase font-bold text-slate-400 mb-3">Technician workload</h4><div id="fsiTechnicians" class="space-y-2"></div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><h4 class="text-xs uppercase font-bold text-slate-400 mb-3">Regional performance</h4><div id="fsiRegions" class="space-y-2"></div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><h4 class="text-xs uppercase font-bold text-slate-400 mb-3">Material variance</h4><div id="fsiVariance" class="space-y-2"></div></div>
+    <div class="bg-brand-900 border border-brand-600 rounded-xl p-4"><h4 class="text-xs uppercase font-bold text-slate-400 mb-3">Customer voice</h4><div id="fsiVoice" class="space-y-2"></div></div>
+  </div>
+
+  <div class="mt-4 grid lg:grid-cols-3 gap-4">
+    <div class="bg-brand-900 border border-emerald-700/40 rounded-xl p-4 lg:col-span-2">
+      <div class="flex items-center justify-between mb-3"><div><div class="text-[10px] uppercase tracking-[.18em] text-emerald-400 font-bold">LIVE FIELD TELEMETRY</div><h4 class="text-sm font-bold text-white">Attendance + job events</h4></div><button class="lifecycle-btn !py-1 !px-2" onclick="renderFieldTelemetry()">Refresh</button></div>
+      <div class="grid grid-cols-4 gap-2 mb-3">
+        <div class="bg-brand-800 rounded-lg p-3"><div class="text-[9px] text-slate-500 uppercase">Active clock-ins</div><b id="ftActive" class="text-lg text-emerald-300">0</b></div>
+        <div class="bg-brand-800 rounded-lg p-3"><div class="text-[9px] text-slate-500 uppercase">Clock-ins today</div><b id="ftClockins" class="text-lg text-sky-300">0</b></div>
+        <div class="bg-brand-800 rounded-lg p-3"><div class="text-[9px] text-slate-500 uppercase">First-time fix</div><b id="ftFtf" class="text-lg text-violet-300">0</b></div>
+        <div class="bg-brand-800 rounded-lg p-3"><div class="text-[9px] text-slate-500 uppercase">Revisits</div><b id="ftRevisit" class="text-lg text-rose-300">0</b></div>
+      </div>
+      <div id="fieldTelemetryEvents" class="space-y-2 max-h-64 overflow-auto"></div>
+    </div>
+    <div class="bg-brand-900 border border-emerald-700/40 rounded-xl p-4">
+      <div class="text-[10px] uppercase tracking-[.18em] text-emerald-400 font-bold mb-2">FIELD CONTROL</div>
+      <form onsubmit="recordFieldAttendance(event)" class="space-y-2 mb-4">
+        <select id="fieldAttendanceAction" class="lifecycle-input"><option value="CLOCK_IN">Clock in</option><option value="CLOCK_OUT">Clock out</option></select>
+        <div class="grid grid-cols-2 gap-2"><input id="fieldLat" class="lifecycle-input" type="number" step="0.000001" placeholder="Latitude" required><input id="fieldLon" class="lifecycle-input" type="number" step="0.000001" placeholder="Longitude" required></div>
+        <input id="fieldPhoto" class="lifecycle-input" placeholder="Attendance photo/object URL" required>
+        <button class="lifecycle-btn w-full" type="button" onclick="captureFieldLocation()">Use current GPS</button>
+        <button class="lifecycle-btn w-full" type="submit">Record attendance</button>
+      </form>
+      <form onsubmit="recordFieldJobEvent(event)" class="space-y-2 border-t border-brand-600 pt-4">
+        <select id="fieldEventType" class="lifecycle-input"><option>ARRIVAL</option><option>DEPARTURE</option><option>FIRST_TIME_FIX</option><option>REVISIT_REQUIRED</option><option>CUSTOMER_SIGNED</option><option>JOB_NOTE</option></select>
+        <select id="fieldEventProject" class="lifecycle-input"><option value="">Project</option></select>
+        <input id="fieldEventTask" class="lifecycle-input" placeholder="Task ID (optional)">
+        <input id="fieldEventLat" class="lifecycle-input" type="number" step="0.000001" placeholder="Latitude (optional)">
+        <input id="fieldEventLon" class="lifecycle-input" type="number" step="0.000001" placeholder="Longitude (optional)">
+        <input id="fieldEventPhoto" class="lifecycle-input" placeholder="Photo/object URL (optional)">
+        <input id="fieldSignature" class="lifecycle-input" placeholder="Customer signature reference (required for CUSTOMER_SIGNED)">
+        <input id="fieldEventNote" class="lifecycle-input" placeholder="Field note">
+        <button class="lifecycle-btn w-full" type="submit">Record job event</button>
+      </form>
+    </div>
+  </div>
+</section>
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5"><div><div class="text-[10px] uppercase tracking-[.18em] text-emerald-400 font-bold">REVENUE TO REALIZED VALUE</div><h3 class="text-xl font-bold text-white">Customer / Project Lifecycle</h3><p class="text-xs text-slate-400 mt-1">Lead → customer → quote → project → delivery evidence → billing → customer voice.</p></div><button class="lifecycle-btn" onclick="renderCustomerLifecycle()"><i class="fa-solid fa-rotate mr-1"></i> Refresh</button></div>
+                        <div id="lifecyclePipeline" class="lifecycle-pipeline mb-5"></div>
+<div class="workspace-card full mb-5" id="v15WorkspaceHub" style="background:linear-gradient(145deg,rgba(15,23,42,.98),rgba(7,16,20,.98));border-color:rgba(56,189,248,.22);">
+  <div class="workspace-header">
+    <div>
+      <div class="text-[10px] uppercase tracking-[.18em] text-sky-400 font-bold">360° OPERATIONAL WORKSPACES</div>
+      <h4 class="workspace-title text-white">Work from the business object, not the module</h4>
+      <p class="workspace-subtitle">Customer, project and technician context assembled from the records already in this ERP.</p>
+    </div>
+    <div class="workspace-actions">
+      <button type="button" onclick="renderV15Workspaces()">Refresh</button>
+      <button type="button" class="primary" onclick="switchModuleView('tasks')">Open task workspace</button>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-3 gap-3 mb-4">
+    <label class="text-xs text-slate-400">Customer 360
+      <select id="v15CustomerSelect" class="lifecycle-input mt-1" onchange="renderV15Customer360()"></select>
+    </label>
+    <label class="text-xs text-slate-400">Project 360
+      <select id="v15ProjectSelect" class="lifecycle-input mt-1" onchange="renderV15Project360()"></select>
+    </label>
+    <label class="text-xs text-slate-400">Technician workspace
+      <select id="v15TechnicianSelect" class="lifecycle-input mt-1" onchange="renderV15Technician360()"></select>
+    </label>
+  </div>
+
+  <div class="workspace-grid">
+    <section class="workspace-card wide" id="v15Customer360Card">
+      <h3 class="text-sky-300">Customer 360</h3>
+      <div id="v15Customer360"></div>
+    </section>
+    <section class="workspace-card wide" id="v15Project360Card">
+      <h3 class="text-emerald-300">Project 360</h3>
+      <div id="v15Project360"></div>
+    </section>
+    <section class="workspace-card full" id="v15Technician360Card">
+      <h3 class="text-amber-300">Technician Workspace</h3>
+      <div id="v15Technician360"></div>
+    </section>
+  </div>
+</div>
+
+                        <div class="lifecycle-card mb-5" style="border-color:rgba(56,189,248,.25);background:linear-gradient(145deg,rgba(8,24,30,.98),rgba(7,16,20,.96));">
+                            <div class="flex items-center justify-between gap-3 mb-4"><div><div class="text-[10px] uppercase tracking-[.18em] text-sky-400 font-bold">PROJECT EXECUTION CONTROL</div><h4 class="text-lg font-bold text-white">Job Packet</h4><p class="text-xs text-slate-400 mt-1">Assignment → schedule → BOM → evidence → completion review.</p></div><button class="lifecycle-btn" onclick="renderProjectExecution()"><i class="fa-solid fa-rotate mr-1"></i> Refresh</button></div>
+                            <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+                                <form onsubmit="createExecutionAssignment(event)" class="space-y-2"><div class="text-xs font-bold text-sky-300">Assign technician</div><select id="execProject" class="lifecycle-input" required><option value="">Project</option></select><input id="execTask" class="lifecycle-input" placeholder="Task ID (optional)"><select id="execTech" class="lifecycle-input" required><option value="">Technician</option></select><button class="lifecycle-btn w-full" type="submit">Assign</button></form>
+                                <form onsubmit="createExecutionSchedule(event)" class="space-y-2"><div class="text-xs font-bold text-sky-300">Schedule job</div><select id="schedProject" class="lifecycle-input" required><option value="">Project</option></select><input id="schedTask" class="lifecycle-input" placeholder="Task ID (optional)"><input id="schedStart" type="datetime-local" class="lifecycle-input" required><input id="schedEnd" type="datetime-local" class="lifecycle-input"><button class="lifecycle-btn w-full" type="submit">Schedule</button></form>
+                                <form onsubmit="createExecutionBOM(event)" class="space-y-2"><div class="text-xs font-bold text-sky-300">BOM / material plan</div><select id="bomProject" class="lifecycle-input" required><option value="">Project</option></select><input id="bomTask" class="lifecycle-input" placeholder="Task ID (optional)"><input id="bomItem" class="lifecycle-input" placeholder="Item / serial class" required><div class="grid grid-cols-2 gap-2"><input id="bomQty" type="number" min="0.01" step="0.01" class="lifecycle-input" placeholder="Qty" required><input id="bomCost" type="number" min="0" step="0.01" class="lifecycle-input" placeholder="Unit cost"></div><button class="lifecycle-btn w-full" type="submit">Request material</button></form>
+                                <form onsubmit="submitExecutionCompletion(event)" class="space-y-2"><div class="text-xs font-bold text-sky-300">Completion gate</div><select id="reviewProject" class="lifecycle-input" required><option value="">Project</option></select><input id="reviewTask" class="lifecycle-input" placeholder="Task ID (optional)"><button class="lifecycle-btn w-full" type="submit">Submit for review</button></form>
+                            </div>
+                            <div class="grid md:grid-cols-3 gap-3 mt-4"><div><div class="text-[10px] uppercase text-slate-500 mb-2">Assignments</div><div id="executionAssignments"></div></div><div><div class="text-[10px] uppercase text-slate-500 mb-2">Schedule</div><div id="executionSchedule"></div></div><div><div class="text-[10px] uppercase text-slate-500 mb-2">Completion reviews</div><div id="executionReviews"></div></div></div>
+                        </div>
+                        <div class="lifecycle-grid">
+                            <div class="lifecycle-card"><h4><i class="fa-solid fa-user-plus mr-1"></i> Lead capture</h4><form onsubmit="createLifecycleLead(event)" class="space-y-2"><input id="lifeLeadName" class="lifecycle-input" placeholder="Lead / company name" required><div class="grid grid-cols-2 gap-2"><input id="lifeLeadPhone" class="lifecycle-input" placeholder="Phone"><input id="lifeLeadEmail" class="lifecycle-input" placeholder="Email"></div><div class="flex gap-2"><input id="lifeLeadSource" class="lifecycle-input" placeholder="Source"><button class="lifecycle-btn" type="submit">Capture</button></div></form><div id="lifecycleLeads" class="mt-4"></div></div>
+                            <div class="lifecycle-card"><h4><i class="fa-solid fa-file-signature mr-1"></i> Quote control</h4><form onsubmit="createLifecycleQuote(event)" class="space-y-2"><select id="lifeQuoteCustomer" class="lifecycle-input" required><option value="">Select customer</option></select><input id="lifeQuoteTitle" class="lifecycle-input" placeholder="Quote / solution title" required><div class="grid grid-cols-2 gap-2"><input id="lifeQuoteAmount" type="number" min="0.01" step="0.01" class="lifecycle-input" placeholder="Amount (KES)" required><input id="lifeQuoteValid" type="date" class="lifecycle-input"></div><button class="lifecycle-btn" type="submit">Create quote</button></form><div id="lifecycleQuotes" class="mt-4"></div></div>
+                            <div class="lifecycle-card"><h4><i class="fa-solid fa-diagram-project mr-1"></i> Project launch</h4><form onsubmit="createLifecycleProject(event)" class="space-y-2"><select id="lifeProjectCustomer" class="lifecycle-input" required><option value="">Select customer</option></select><select id="lifeProjectQuote" class="lifecycle-input"><option value="">No quote link</option></select><input id="lifeProjectName" class="lifecycle-input" placeholder="Project / installation name" required><div class="grid grid-cols-2 gap-2"><input id="lifeProjectRegion" class="lifecycle-input" placeholder="Region" required><input id="lifeProjectTarget" type="date" class="lifecycle-input"></div><button class="lifecycle-btn" type="submit">Launch project</button></form><div id="lifecycleProjects" class="mt-4"></div></div>
+                            <div class="lifecycle-card"><h4><i class="fa-solid fa-camera mr-1"></i> Completion + customer voice</h4><form onsubmit="addLifecycleEvidence(event)" class="space-y-2"><select id="lifeEvidenceProject" class="lifecycle-input" required><option value="">Select project</option></select><input id="lifeEvidenceTask" class="lifecycle-input" placeholder="Task ID (optional)"><div class="grid grid-cols-2 gap-2"><select id="lifeEvidenceType" class="lifecycle-input"><option>Customer Signature</option><option>Before Photo</option><option>After Photo</option><option>Installation Report</option><option>Delivery Note</option></select><input id="lifeEvidenceURL" class="lifecycle-input" placeholder="Evidence URL / object key" required></div><input id="lifeEvidenceNote" class="lifecycle-input" placeholder="Completion note"><button class="lifecycle-btn" type="submit">Attach evidence</button></form><form onsubmit="addLifecycleSatisfaction(event)" class="space-y-2 mt-4 pt-4 border-t border-brand-600"><div class="grid grid-cols-2 gap-2"><select id="lifeSatCustomer" class="lifecycle-input" required><option value="">Customer</option></select><select id="lifeSatProject" class="lifecycle-input"><option value="">Project</option></select></div><div class="grid grid-cols-2 gap-2"><select id="lifeSatRating" class="lifecycle-input"><option value="5">5 — Excellent</option><option value="4">4 — Good</option><option value="3">3 — Fair</option><option value="2">2 — Poor</option><option value="1">1 — Critical</option></select><input id="lifeSatComment" class="lifecycle-input" placeholder="Customer feedback"></div><button class="lifecycle-btn" type="submit">Record satisfaction</button></form><div id="lifecycleEvidence" class="mt-4"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Module G: User Directory & Visual Team Hierarchy -->
                 <div id="view_users" class="hidden space-y-6">
                     <!-- Tab Headers -->
                     <div class="flex border-b border-brand-600 gap-4 mb-4">
@@ -1313,6 +1748,7 @@ const htmlContent = `
                 </div>
 
             </div>
+        </div>
         </div>
     </div>
 
@@ -1608,6 +2044,10 @@ const htmlContent = `
         }
 
         let currentState = {};
+        let currentLifecycle = {leads:[], quotes:[], projects:[], evidence:[], satisfaction:[]};
+        let currentExecution = {assignments:[],schedule:[],bom:[],reviews:[]};
+        let currentIntelligence = {summary:{},technicians:[],regions:[],material_variance:[],customer_voice:[]};
+        let currentTelemetry = {telemetry_summary:[],job_summary:[],attendance:[],job_events:[]};
         let currentHeaders = {};
         let currentUser = {};
         let authToken = '';
@@ -1797,7 +2237,7 @@ const htmlContent = `
         function switchModuleView(viewName) {
             activeView = viewName;
 
-            const views = ['dashboard', 'inventory', 'finance', 'tasks', 'customers', 'users', 'rbac'];
+            const views = ['dashboard', 'approvals', 'inventory', 'finance', 'profitability', 'tasks', 'customers', 'lifecycle', 'users', 'rbac'];
             views.forEach(v => {
                 const el = document.getElementById('view_' + v);
                 if (el) el.classList.add('hidden');
@@ -1812,15 +2252,42 @@ const htmlContent = `
             const link = document.getElementById('navLink_' + viewName);
             if (link) link.className = 'w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-bold transition';
 
+            if (viewName === 'lifecycle') {
+                renderCustomerLifecycle();
+                renderProjectExecution();
+                renderV15Workspaces();
+            }
+
             let title = 'Dashboard Home';
-            if (viewName === 'inventory') title = 'Inventory Serial Tracking';
+            if (viewName === 'approvals') title = 'Governance & Approval Center';
+            else if (viewName === 'inventory') title = 'Inventory Serial Tracking';
             else if (viewName === 'finance') title = 'Finance &amp; M-Pesa payments';
+            else if (viewName === 'profitability') title = 'Job Profitability &amp; Transaction Ledger';
             else if (viewName === 'tasks') title = 'Field Materials &amp; Timesheets';
             else if (viewName === 'customers') title = 'Customer relationship (CRM)';
+            else if (viewName === 'lifecycle') title = 'Customer & Project Lifecycle';
+            if (viewName === 'lifecycle') setTimeout(renderProjectExecution, 50);
             else if (viewName === 'users') title = 'Personnel &amp; Key Directory';
             else if (viewName === 'rbac') title = 'RBAC Policy Engine';
 
             document.getElementById('currentModuleTitle').innerHTML = title;
+            const contextMeta = {
+                dashboard:['Dashboard','Executive Command Center','A unified view of customers, delivery, inventory, governance, finance and field execution.'],
+                approvals:['Governance','Approval Center','Maker-checker controls, governed execution and reconciliation in one queue.'],
+                inventory:['Operations','Inventory Control','Serialized assets, stock position, allocation and replenishment visibility.'],
+                finance:['Finance','Finance & Payments','Invoices, payments, reconciliation and cash movement.'],
+                profitability:['Finance','Job Profitability','Revenue, material cost, labour cost and realized margin.'],
+                tasks:['Execution','Tasks & Requisitions','Field work, materials, timesheets and dependencies.'],
+                customers:['Commercial','Customer CRM','Customer relationships, service requests and account context.'],
+                lifecycle:['Delivery','Customer / Project Lifecycle','Lead-to-cash delivery control with project execution and field evidence.'],
+                users:['Administration','Personnel Profiles','People, managers, regions and workspace access.'],
+                rbac:['Governance','RBAC Policy Engine','Role and permission policy configuration.']
+            };
+            const meta = contextMeta[viewName] || contextMeta.dashboard;
+            document.getElementById('erpContextCrumb').textContent = meta[0];
+            document.getElementById('erpContextTitle').textContent = meta[1];
+            document.getElementById('erpContextSub').textContent = meta[2];
+            if (viewName === 'profitability') renderProfitability();
             closeMobileSidebar();
         }
 
@@ -1872,7 +2339,16 @@ const htmlContent = `
                 const res = await fetch('/api/state', { headers: currentHeaders });
                 const data = await res.json();
                 currentState = data;
+                try { const lr = await fetch('/api/lifecycle', {headers: currentHeaders}); if (lr.ok) currentLifecycle = await lr.json(); } catch(e) { console.warn('Lifecycle refresh failed',e); }
+                try { const er = await fetch('/api/execution', {headers: currentHeaders}); if (er.ok) currentExecution = await er.json(); } catch(e) { console.warn('Execution refresh failed',e); }
+                try { const ir = await fetch('/api/intelligence', {headers: currentHeaders}); if (ir.ok) currentIntelligence = await ir.json(); } catch(e) { console.warn('Intelligence refresh failed',e); }
+                try { const tr = await fetch('/api/field/telemetry', {headers: currentHeaders}); if (tr.ok) currentTelemetry = await tr.json(); } catch(e) { console.warn('Field telemetry refresh failed',e); }
                 renderDashboard();
+                renderApprovalCenter();
+                renderFieldServiceIntelligence();
+                renderFieldTelemetry();
+                renderV15Workspaces();
+                if (activeView === 'profitability') renderProfitability();
             } catch (err) {
                 console.error('Error loading state:', err);
             }
@@ -1960,6 +2436,345 @@ const htmlContent = `
             }
         }
 
+        function lifecycleCustomers(){return Object.values(currentState.customers||{}).filter(x=>x.tenant_id===currentUser.tenant_id)}
+        function renderCustomerLifecycle(){
+            const p=document.getElementById('lifecyclePipeline'); if(!p||!currentUser)return; const tenant=currentUser.tenant_id, customers=lifecycleCustomers(), leads=currentLifecycle.leads||[], quotes=currentLifecycle.quotes||[], projects=currentLifecycle.projects||[], evidence=currentLifecycle.evidence||[], sats=currentLifecycle.satisfaction||[]; const tasks=Object.values(currentState.tasks||{}).filter(x=>x.tenant_id===tenant); const invoices=Object.values(currentState.invoices||{}).filter(x=>x.tenant_id===tenant);
+            p.innerHTML=[['Leads',leads.length],['Customers',customers.length],['Quotes',quotes.length],['Approved',quotes.filter(x=>x.status==='Approved').length],['Projects',projects.length],['Jobs',tasks.filter(x=>x.project_id).length],['Paid',invoices.filter(x=>x.status==='Paid').length]].map(x=>'<div class="lifecycle-stage"><span>'+x[0]+'</span><b>'+x[1]+'</b><small class="text-[9px] text-slate-500">records</small></div>').join('');
+            const cOpts='<option value="">Select customer</option>'+customers.map(c=>'<option value="'+erpEscape(c.id)+'">'+erpEscape(c.name)+'</option>').join(''); ['lifeQuoteCustomer','lifeProjectCustomer','lifeSatCustomer'].forEach(id=>{const el=document.getElementById(id);if(el){const v=el.value;el.innerHTML=cOpts;el.value=v}});
+            const qOpts='<option value="">No quote link</option>'+quotes.filter(q=>q.status==='Approved').map(q=>'<option value="'+erpEscape(q.id)+'">'+erpEscape(q.title)+' · KES '+Number(q.amount||0).toLocaleString()+'</option>').join(''); const qel=document.getElementById('lifeProjectQuote');if(qel){const v=qel.value;qel.innerHTML=qOpts;qel.value=v}
+            const prOpts='<option value="">Select project</option>'+projects.map(x=>'<option value="'+erpEscape(x.id)+'">'+erpEscape(x.name)+'</option>').join(''); ['lifeEvidenceProject','lifeSatProject'].forEach(id=>{const el=document.getElementById(id);if(el){const v=el.value;el.innerHTML=prOpts;el.value=v}});
+            document.getElementById('lifecycleLeads').innerHTML=leads.slice(0,6).map(x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.name)+'<small class="block text-slate-500">'+erpEscape(x.source||'Unknown')+'</small></span><span>'+ (x.status==='Converted'?'<span class="lifecycle-chip">Converted</span>':'<button class="lifecycle-btn !py-1 !px-2" onclick="convertLifecycleLead(\''+erpEscape(x.id)+'\')">Convert</button>') +'</span></div>').join('')||'<div class="text-xs text-slate-500">No leads captured.</div>';
+            document.getElementById('lifecycleQuotes').innerHTML=quotes.slice(0,6).map(x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.title)+'<small class="block text-slate-500">KES '+Number(x.amount||0).toLocaleString()+'</small></span><span>'+ (x.status==='Draft'?'<button class="lifecycle-btn !py-1 !px-2" onclick="submitLifecycleQuote(\''+erpEscape(x.id)+'\')">Submit</button>':x.status==='Pending_Approval'?'<button class="lifecycle-btn !py-1 !px-2" onclick="approveLifecycleQuote(\''+erpEscape(x.id)+'\')">Approve</button>':'<span class="lifecycle-chip">'+erpEscape(x.status)+'</span>') +'</span></div>').join('')||'<div class="text-xs text-slate-500">No quotes yet.</div>';
+            document.getElementById('lifecycleProjects').innerHTML=projects.slice(0,6).map(x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.name)+'<small class="block text-slate-500">'+erpEscape(x.region)+'</small></span><span class="lifecycle-chip">'+erpEscape(x.status)+'</span></div>').join('')||'<div class="text-xs text-slate-500">No projects yet.</div>';
+            document.getElementById('lifecycleEvidence').innerHTML='<div class="lifecycle-metric"><span>Completion evidence</span><b class="text-emerald-300">'+evidence.length+'</b></div><div class="lifecycle-metric"><span>Customer responses</span><b class="text-sky-300">'+sats.length+'</b></div>';
+        }
+        function renderProjectExecution(){
+            if(!currentUser)return; const projects=currentLifecycle.projects||[], users=Object.values(currentState.users||{}).filter(u=>u.tenant_id===currentUser.tenant_id);
+            const fill=(id,items,label,empty)=>{const el=document.getElementById(id);if(!el)return;el.innerHTML='<option value="">'+label+'</option>'+items.map(x=>'<option value="'+erpEscape(x.id)+'">'+erpEscape(x.name||x.title||x.id)+'</option>').join('')};
+            ['execProject','schedProject','bomProject','reviewProject'].forEach(id=>fill(id,projects,'Project','Project'));
+            fill('execTech',users.filter(u=>['technician','field_technician','admin','manager'].includes(String(u.role||'').toLowerCase())), 'Technician','Technician');
+            const compact=(arr,fn)=>arr.slice(0,5).map(fn).join('')||'<div class="text-xs text-slate-500">No records.</div>';
+            document.getElementById('executionAssignments').innerHTML=compact(currentExecution.assignments||[],x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.technician_id)+'<small class="block text-slate-500">'+erpEscape(x.project_id)+(x.task_id?' · '+erpEscape(x.task_id):'')+'</small></span><span class="lifecycle-chip">'+erpEscape(x.status)+'</span></div>');
+            document.getElementById('executionSchedule').innerHTML=compact(currentExecution.schedule||[],x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.project_id)+'<small class="block text-slate-500">'+new Date(x.scheduled_start).toLocaleString()+'</small></span><span class="lifecycle-chip">'+erpEscape(x.status)+'</span></div>');
+            document.getElementById('executionReviews').innerHTML=compact(currentExecution.reviews||[],x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.project_id)+'<small class="block text-slate-500">Evidence '+x.evidence_count+'</small></span><span>'+(x.status==='Submitted'?'<button class="lifecycle-btn !py-1 !px-2" onclick="reviewExecution(\''+erpEscape(x.id)+'\',\'Approved\')">Approve</button>':'<span class="lifecycle-chip">'+erpEscape(x.status)+'</span>')+'</span></div>');
+        }
+        async function executionPost(url,payload){const res=await fetch(url,{method:'POST',headers:{...currentHeaders,'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok)throw new Error(data.error||'Request failed');return data}
+        async function createExecutionAssignment(e){e.preventDefault();try{await executionPost('/api/execution/assign',{project_id:execProject.value,task_id:execTask.value,technician_id:execTech.value,role:'Technician'});erpToast('Technician assigned','Execution ownership recorded.','ok');e.target.reset();await fetchState();renderProjectExecution()}catch(err){erpToast('Assignment failed',err.message,'err')}}
+        async function createExecutionSchedule(e){e.preventDefault();try{await executionPost('/api/execution/schedule',{project_id:schedProject.value,task_id:schedTask.value,scheduled_start:new Date(schedStart.value).toISOString(),scheduled_end:schedEnd.value?new Date(schedEnd.value).toISOString():null});erpToast('Job scheduled','Project schedule updated.','ok');e.target.reset();await fetchState();renderProjectExecution()}catch(err){erpToast('Schedule failed',err.message,'err')}}
+        async function createExecutionBOM(e){e.preventDefault();try{await executionPost('/api/execution/bom',{project_id:bomProject.value,task_id:bomTask.value,item_name:bomItem.value,quantity:Number(bomQty.value),unit_cost:Number(bomCost.value||0)});erpToast('Material requested','BOM line added to the job packet.','ok');e.target.reset();await fetchState();renderProjectExecution()}catch(err){erpToast('Material request failed',err.message,'err')}}
+        async function submitExecutionCompletion(e){e.preventDefault();try{await executionPost('/api/execution/complete/submit',{project_id:reviewProject.value,task_id:reviewTask.value});erpToast('Completion submitted','The job is awaiting independent review.','ok');e.target.reset();await fetchState();renderProjectExecution()}catch(err){erpToast('Completion gate failed',err.message,'err')}}
+        async function reviewExecution(id,status){try{await executionPost('/api/execution/complete/review',{review_id:id,status:status,note:'Completion evidence reviewed'});erpToast('Completion reviewed','Project status has been updated.','ok');await fetchState();renderProjectExecution()}catch(err){erpToast('Review failed',err.message,'err')}
+            renderV15Workspaces();
+        }
+        async function lifecyclePost(url,payload){const res=await fetch(url,{method:'POST',headers:{...currentHeaders,'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok)throw new Error(data.error||'Request failed');return data}
+        async function convertLifecycleLead(id){try{await lifecyclePost('/api/lifecycle/leads/convert',{lead_id:id});erpToast('Lead converted','Customer record created and linked to the commercial pipeline.','ok');await fetchState()}catch(err){erpToast('Conversion failed',err.message,'err')}}
+        async function submitLifecycleQuote(id){try{await lifecyclePost('/api/lifecycle/quotes/submit',{quote_id:id});erpToast('Quote submitted','Quote is awaiting maker-checker approval.','ok');await fetchState()}catch(err){erpToast('Submission failed',err.message,'err')}}
+        async function approveLifecycleQuote(id){try{await lifecyclePost('/api/lifecycle/quotes/approve',{quote_id:id});erpToast('Quote approved','Approved commercial value can now launch a project.','ok');await fetchState()}catch(err){erpToast('Approval failed',err.message,'err')}}
+        async function createLifecycleLead(e){e.preventDefault();try{await lifecyclePost('/api/lifecycle/leads',{name:lifeLeadName.value,phone:lifeLeadPhone.value,email:lifeLeadEmail.value,source:lifeLeadSource.value});erpToast('Lead captured','Lead entered the commercial pipeline.','ok');e.target.reset();await fetchState()}catch(err){erpToast('Lead failed',err.message,'err')}}
+        async function createLifecycleQuote(e){e.preventDefault();try{await lifecyclePost('/api/lifecycle/quotes',{customer_id:lifeQuoteCustomer.value,title:lifeQuoteTitle.value,amount:Number(lifeQuoteAmount.value),valid_until:lifeQuoteValid.value?new Date(lifeQuoteValid.value).toISOString():null});erpToast('Quote created','Commercial offer is ready for submission.','ok');e.target.reset();await fetchState()}catch(err){erpToast('Quote failed',err.message,'err')}}
+        async function createLifecycleProject(e){e.preventDefault();try{await lifecyclePost('/api/lifecycle/projects',{customer_id:lifeProjectCustomer.value,quote_id:lifeProjectQuote.value,name:lifeProjectName.value,region:lifeProjectRegion.value,target_date:lifeProjectTarget.value?new Date(lifeProjectTarget.value).toISOString():null});erpToast('Project launched','Project is now part of execution.','ok');e.target.reset();await fetchState()}catch(err){erpToast('Project failed',err.message,'err')}}
+        async function addLifecycleEvidence(e){e.preventDefault();try{await lifecyclePost('/api/lifecycle/evidence',{project_id:lifeEvidenceProject.value,task_id:lifeEvidenceTask.value,evidence_type:lifeEvidenceType.value,url:lifeEvidenceURL.value,note:lifeEvidenceNote.value});erpToast('Evidence attached','Completion evidence recorded.','ok');e.target.reset();await fetchState()}catch(err){erpToast('Evidence failed',err.message,'err')}}
+        async function addLifecycleSatisfaction(e){e.preventDefault();try{await lifecyclePost('/api/lifecycle/satisfaction',{customer_id:lifeSatCustomer.value,project_id:lifeSatProject.value,rating:Number(lifeSatRating.value),comment:lifeSatComment.value});erpToast('Customer voice recorded','Satisfaction linked to delivery.','ok');e.target.reset();await fetchState()}catch(err){erpToast('Feedback failed',err.message,'err')}}
+
+        function renderFieldServiceIntelligence(){
+            const s=currentIntelligence.summary||{};
+            const val=k=>s[k]===null||s[k]===undefined?'0':Number(s[k]).toLocaleString(undefined,{maximumFractionDigits:1});
+            const el=id=>document.getElementById(id);
+            if(el('fsiOpen')) el('fsiOpen').textContent=val('open_tasks');
+            if(el('fsiOverdue')) el('fsiOverdue').textContent=val('overdue_tasks');
+            if(el('fsiSla')) el('fsiSla').textContent=val('sla_risk');
+            if(el('fsiMargin')) el('fsiMargin').textContent='KES '+val('gross_margin');
+            if(el('fsiCsat')) el('fsiCsat').textContent=val('avg_csat')+'/5';
+            if(el('fsiCompletion')) { const total=Number(s.total_tasks||0),done=Number(s.completed_tasks||0); el('fsiCompletion').textContent=(total?((done/total)*100).toFixed(1):'0')+'%'; }
+            const tech=el('fsiTechnicians'); if(tech) tech.innerHTML=(currentIntelligence.technicians||[]).slice(0,8).map(x=>'<div class="lifecycle-metric"><span><b>'+erpEscape(x.name||x.technician_id)+'</b><small class="block text-slate-500">'+erpEscape(x.region||'')+' · '+x.approved_hours+'h approved</small></span><span><span class="lifecycle-chip">'+x.open_tasks+' open</span>'+(Number(x.overdue_tasks)>0?'<span class="ml-1 text-rose-300 text-[10px]">'+x.overdue_tasks+' overdue</span>':'')+'</span></div>').join('')||'<div class="text-xs text-slate-500">No technician workload data.</div>';
+            const regions=el('fsiRegions'); if(regions) regions.innerHTML=(currentIntelligence.regions||[]).map(x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.region||'Unassigned')+'<small class="block text-slate-500">'+x.total_tasks+' jobs · '+x.completed_tasks+' completed</small></span><span class="lifecycle-chip">'+x.completion_pct+'% complete</span></div>').join('')||'<div class="text-xs text-slate-500">No regional data.</div>';
+            const mat=el('fsiVariance'); if(mat) mat.innerHTML=(currentIntelligence.material_variance||[]).slice(0,8).map(x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.name||x.project_id)+'<small class="block text-slate-500">Plan KES '+Number(x.planned_material_cost||0).toLocaleString()+' · Actual KES '+Number(x.actual_material_cost||0).toLocaleString()+'</small></span><span class="'+(Number(x.variance)>0?'text-rose-300':'text-emerald-300')+' font-bold">'+(Number(x.variance)>0?'+':'')+'KES '+Number(x.variance||0).toLocaleString()+'</span></div>').join('')||'<div class="text-xs text-slate-500">No material variance data.</div>';
+            const voice=el('fsiVoice'); if(voice) voice.innerHTML=(currentIntelligence.customer_voice||[]).slice(0,8).map(x=>'<div class="lifecycle-metric"><span>'+erpEscape(x.name||x.customer_id)+'<small class="block text-slate-500">'+x.responses+' response(s)</small></span><span class="lifecycle-chip">'+Number(x.avg_rating||0).toFixed(1)+'/5</span></div>').join('')||'<div class="text-xs text-slate-500">No customer feedback recorded.</div>';
+        }
+
+        function renderFieldTelemetry(){
+            const a=(currentTelemetry.telemetry_summary||[])[0]||{}, j=(currentTelemetry.job_summary||[])[0]||{}, el=id=>document.getElementById(id);
+            if(el('ftActive'))el('ftActive').textContent=Number(a.active_clockins||0);
+            if(el('ftClockins'))el('ftClockins').textContent=Number(a.clockins_today||0);
+            if(el('ftFtf'))el('ftFtf').textContent=Number(j.first_time_fix_today||0);
+            if(el('ftRevisit'))el('ftRevisit').textContent=Number(j.revisits_today||0);
+            const events=el('fieldTelemetryEvents'); if(events) events.innerHTML=(currentTelemetry.job_events||[]).slice(0,15).map(x=>'<div class="lifecycle-metric"><span><b>'+erpEscape(x.event_type||'EVENT')+'</b><small class="block text-slate-500">'+erpEscape(x.technician_name||x.technician_id||'')+' · '+erpEscape(x.task_id||x.project_id||'')+'</small></span><span class="text-[10px] text-slate-400">'+(x.occurred_at?new Date(x.occurred_at).toLocaleString():'')+'</span></div>').join('')||'<div class="text-xs text-slate-500">No field events recorded.</div>';
+            const opts='<option value="">Project</option>'+(currentLifecycle.projects||[]).map(x=>'<option value="'+erpEscape(x.id)+'">'+erpEscape(x.name)+'</option>').join(''); const pe=el('fieldEventProject'); if(pe){const v=pe.value;pe.innerHTML=opts;pe.value=v;}
+        }
+        function captureFieldLocation(){ if(!navigator.geolocation){erpToast('GPS unavailable','This browser does not expose geolocation.','err');return;} navigator.geolocation.getCurrentPosition(pos=>{fieldLat.value=pos.coords.latitude.toFixed(6);fieldLon.value=pos.coords.longitude.toFixed(6);erpToast('GPS captured','Current coordinates inserted.','ok')},err=>erpToast('GPS failed',err.message,'err'),{enableHighAccuracy:true,timeout:10000,maximumAge:0}); }
+        async function recordFieldAttendance(e){e.preventDefault();try{const res=await fetch('/api/field/attendance',{method:'POST',headers:{...currentHeaders,'Content-Type':'application/json'},body:JSON.stringify({action:fieldAttendanceAction.value,latitude:Number(fieldLat.value),longitude:Number(fieldLon.value),photo_url:fieldPhoto.value})});const d=await res.json();if(!res.ok)throw new Error(d.error||'Attendance failed');erpToast('Attendance recorded','Field attendance telemetry is now auditable.','ok');await fetchState()}catch(err){erpToast('Attendance failed',err.message,'err')}}
+        async function recordFieldJobEvent(e){e.preventDefault();try{const res=await fetch('/api/field/job-event',{method:'POST',headers:{...currentHeaders,'Content-Type':'application/json'},body:JSON.stringify({project_id:fieldEventProject.value,task_id:fieldEventTask.value,event_type:fieldEventType.value,latitude:Number(fieldEventLat.value||0),longitude:Number(fieldEventLon.value||0),photo_url:fieldEventPhoto.value,customer_signature_url:fieldSignature.value,note:fieldEventNote.value})});const d=await res.json();if(!res.ok)throw new Error(d.error||'Job event failed');erpToast('Field event recorded','Execution telemetry added to the job history.','ok');e.target.reset();await fetchState()}catch(err){erpToast('Job event failed',err.message,'err')}}
+
+        function renderV15Workspaces() {
+            if (!currentUser) return;
+            const tenantID = currentUser.tenant_id;
+
+            // Populate Customer Select
+            const custSelect = document.getElementById('v15CustomerSelect');
+            if (custSelect) {
+                const prevVal = custSelect.value;
+                const customers = Object.values(currentState.customers || {}).filter(c => c.tenant_id === tenantID);
+                custSelect.innerHTML = customers.map(c => '<option value="'+erpEscape(c.id)+'">'+erpEscape(c.name)+' ('+erpEscape(c.id)+')</option>').join('') || '<option value="">No Customers</option>';
+                if (prevVal && customers.some(c => c.id === prevVal)) custSelect.value = prevVal;
+            }
+
+            // Populate Project Select
+            const projSelect = document.getElementById('v15ProjectSelect');
+            if (projSelect) {
+                const prevVal = projSelect.value;
+                const projects = (currentLifecycle.projects || []).filter(p => p.tenant_id === tenantID);
+                projSelect.innerHTML = projects.map(p => '<option value="'+erpEscape(p.id)+'">'+erpEscape(p.name)+' ('+erpEscape(p.id)+')</option>').join('') || '<option value="">No Projects</option>';
+                if (prevVal && projects.some(p => p.id === prevVal)) projSelect.value = prevVal;
+            }
+
+            // Populate Technician Select
+            const techSelect = document.getElementById('v15TechnicianSelect');
+            if (techSelect) {
+                const prevVal = techSelect.value;
+                const techs = Object.values(currentState.users || {}).filter(u => u.tenant_id === tenantID && ['technician','field_technician'].includes(String(u.role_name || u.role || '').toLowerCase()));
+                techSelect.innerHTML = techs.map(u => '<option value="'+erpEscape(u.id)+'">'+erpEscape(u.name)+' ('+erpEscape(u.id)+')</option>').join('') || '<option value="">No Technicians</option>';
+                if (prevVal && techs.some(t => t.id === prevVal)) techSelect.value = prevVal;
+            }
+
+            renderV15Customer360();
+            renderV15Project360();
+            renderV15Technician360();
+        }
+
+        function renderV15Customer360() {
+            const container = document.getElementById('v15Customer360');
+            if (!container) return;
+            const select = document.getElementById('v15CustomerSelect');
+            if (!select || !select.value) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic p-3">No customer selected.</div>';
+                return;
+            }
+            const custId = select.value;
+            const customer = (currentState.customers || {})[custId];
+            if (!customer) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic p-3">Customer details not found.</div>';
+                return;
+            }
+
+            const tenantID = currentUser.tenant_id;
+            const custProjects = (currentLifecycle.projects || []).filter(p => p.customer_id === custId);
+            const custQuotes = (currentLifecycle.quotes || []).filter(q => q.customer_id === custId);
+            const custTasks = Object.values(currentState.tasks || {}).filter(t => t.customer_id === custId);
+            const custInvoices = Object.values(currentState.invoices || {}).filter(i => i.customer_id === custId);
+            const custSats = (currentLifecycle.satisfaction || []).filter(s => s.customer_id === custId);
+
+            let html = '<div class="space-y-4 font-sans text-xs text-slate-300">';
+
+            // Header stats
+            html += '<div class="grid grid-cols-2 gap-2 bg-brand-900/60 p-3 rounded-lg border border-brand-600/50">' +
+                '<div><span class="text-slate-400 block uppercase tracking-wider text-[9px]">Full Name</span><b class="text-white text-sm">'+erpEscape(customer.name)+'</b></div>' +
+                '<div><span class="text-slate-400 block uppercase tracking-wider text-[9px]">Contact Info</span><span class="text-white">'+erpEscape(customer.phone || customer.email || '-')+'</span></div>' +
+                '</div>';
+
+            // Projects and Quotes
+            html += '<div class="grid md:grid-cols-2 gap-3">';
+            html += '<div><h4 class="font-bold text-[10px] text-sky-400 uppercase tracking-wider mb-1">Commercial Pipeline</h4>' +
+                '<div class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">' +
+                custQuotes.map(q => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span>'+erpEscape(q.title)+'</span><span class="font-mono text-emerald-400 font-bold">KES '+Number(q.amount).toLocaleString()+'</span></div>').join('') +
+                (custQuotes.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No quotes found.</div>' : '') +
+                '</div></div>';
+
+            html += '<div><h4 class="font-bold text-[10px] text-emerald-400 uppercase tracking-wider mb-1">Active Projects</h4>' +
+                '<div class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">' +
+                custProjects.map(p => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span class="font-bold text-white">'+erpEscape(p.name)+'</span><span class="lifecycle-chip !text-[9px]">'+erpEscape(p.status)+'</span></div>').join('') +
+                (custProjects.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No projects found.</div>' : '') +
+                '</div></div>';
+            html += '</div>';
+
+            // Tasks and Invoices
+            html += '<div class="grid md:grid-cols-2 gap-3">';
+            html += '<div><h4 class="font-bold text-[10px] text-indigo-400 uppercase tracking-wider mb-1">FTTH Jobs / Tasks</h4>' +
+                '<div class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">' +
+                custTasks.map(t => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span>'+erpEscape(t.title)+'</span><span class="px-1.5 py-0.5 rounded text-[8px] uppercase font-bold '+(t.status==='Completed'?'bg-emerald-950 text-emerald-400':'bg-amber-950 text-amber-400')+'">'+erpEscape(t.status)+'</span></div>').join('') +
+                (custTasks.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No tasks found.</div>' : '') +
+                '</div></div>';
+
+            html += '<div><h4 class="font-bold text-[10px] text-amber-400 uppercase tracking-wider mb-1">Billing &amp; Invoices</h4>' +
+                '<div class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">' +
+                custInvoices.map(i => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span>Invoice: <strong class="text-white">'+erpEscape(i.id)+'</strong></span><span class="font-mono text-rose-300">Bal: KES '+Number(i.balance_amount).toLocaleString()+'</span></div>').join('') +
+                (custInvoices.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No invoices found.</div>' : '') +
+                '</div></div>';
+            html += '</div>';
+
+            // Satisfaction
+            html += '<div><h4 class="font-bold text-[10px] text-teal-400 uppercase tracking-wider mb-1">Customer CSAT Voice</h4>' +
+                '<div class="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">' +
+                custSats.map(s => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span>'+erpEscape(s.comment || 'Rating only')+'</span><span class="font-bold text-amber-300"><i class="fa-solid fa-star mr-0.5 text-[9px]"></i>'+s.rating+'/5</span></div>').join('') +
+                (custSats.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No customer feedback yet.</div>' : '') +
+                '</div></div>';
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        async function renderV15Project360() {
+            const container = document.getElementById('v15Project360');
+            if (!container) return;
+            const select = document.getElementById('v15ProjectSelect');
+            if (!select || !select.value) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic p-3">No project selected.</div>';
+                return;
+            }
+            const projId = select.value;
+            const project = (currentLifecycle.projects || []).find(p => p.id === projId);
+            if (!project) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic p-3">Project details not found.</div>';
+                return;
+            }
+
+            const tenantID = currentUser.tenant_id;
+            const projTasks = Object.values(currentState.tasks || {}).filter(t => t.project_id === projId);
+            const projTaskIDs = new Set(projTasks.map(t => t.id));
+
+            const projInvoices = Object.values(currentState.invoices || {}).filter(inv => inv.project_id === projId || projTaskIDs.has(inv.task_id));
+            const projMaterials = Object.values(currentState.material_requests || {}).filter(m => projTaskIDs.has(m.task_id));
+            const projPayments = Object.values(currentState.payments || {}).filter(p => projInvoices.some(inv => inv.id === p.invoice_id));
+
+            // authoritative backend profitability retrieval
+            let profitabilityData = [];
+            try {
+                const res = await fetch('/api/profitability', {headers: currentHeaders});
+                if (res.ok) profitabilityData = await res.json();
+            } catch (e) {
+                console.warn("Authoritative profitability fetch failed, using heuristics", e);
+            }
+
+            let materialsCost = 0;
+            let laborCost = 0;
+
+            projTasks.forEach(t => {
+                const prof = profitabilityData.find(p => p.task_id === t.id);
+                if (prof) {
+                    materialsCost += Number(prof.material_cost || 0);
+                    laborCost += Number(prof.labor_cost || 0);
+                } else {
+                    const taskMRs = Object.values(currentState.material_requests || {}).filter(mr => mr.task_id === t.id && mr.status === 'Fulfilled');
+                    taskMRs.forEach(mr => {
+                        materialsCost += 5000.0; // standard item fallback unit cost
+                    });
+                    const taskTimesheets = Object.values(currentState.timesheets || {}).filter(ts => ts.task_id === t.id && ts.status === 'Approved');
+                    taskTimesheets.forEach(ts => {
+                        laborCost += Number(ts.hours || 0) * 1500; // standard hourly rate fallback
+                    });
+                }
+            });
+
+            const totalInvoiced = projInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
+            const totalPaid = projInvoices.reduce((sum, inv) => sum + Number(inv.paid_amount || 0), 0);
+            const totalOutstanding = projInvoices.reduce((sum, inv) => sum + Number(inv.balance_amount || 0), 0);
+            const grossMargin = totalInvoiced - materialsCost - laborCost;
+            const marginPct = totalInvoiced > 0 ? (grossMargin / totalInvoiced) * 100 : 0;
+
+            let html = '<div class="space-y-4 font-sans text-xs text-slate-300">';
+
+            // Visual Pipeline Ribbon
+            html += '<div class="bg-brand-900/60 p-4 rounded-xl border border-brand-600/50 space-y-3">' +
+                '<div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">The Realized Business Chain</div>' +
+                '<div class="flex flex-col sm:flex-row items-center justify-between gap-2 text-center text-[10px] font-bold text-slate-400">' +
+                    '<div class="p-2 bg-brand-500 rounded border border-brand-600 w-full sm:w-auto"><i class="fa-solid fa-diagram-project text-sky-400 mb-1 block text-sm"></i>Project<div class="text-white mt-1">'+erpEscape(project.name)+'</div></div>' +
+                    '<div class="text-slate-500 hidden sm:block"><i class="fa-solid fa-arrow-right"></i></div>' +
+                    '<div class="p-2 bg-brand-500 rounded border border-brand-600 w-full sm:w-auto"><i class="fa-solid fa-user-clock text-amber-400 mb-1 block text-sm"></i>Labour<div class="text-white mt-1">KES '+laborCost.toLocaleString()+'</div></div>' +
+                    '<div class="text-slate-500 hidden sm:block"><i class="fa-solid fa-arrow-right"></i></div>' +
+                    '<div class="p-2 bg-brand-500 rounded border border-brand-600 w-full sm:w-auto"><i class="fa-solid fa-cubes text-emerald-400 mb-1 block text-sm"></i>Materials<div class="text-white mt-1">KES '+materialsCost.toLocaleString()+'</div></div>' +
+                    '<div class="text-slate-500 hidden sm:block"><i class="fa-solid fa-arrow-right"></i></div>' +
+                    '<div class="p-2 bg-brand-500 rounded border border-brand-600 w-full sm:w-auto"><i class="fa-solid fa-file-invoice-dollar text-indigo-400 mb-1 block text-sm"></i>Invoice<div class="text-white mt-1">KES '+totalInvoiced.toLocaleString()+'</div></div>' +
+                    '<div class="text-slate-500 hidden sm:block"><i class="fa-solid fa-arrow-right"></i></div>' +
+                    '<div class="p-2 bg-brand-500 rounded border border-brand-600 w-full sm:w-auto"><i class="fa-solid fa-cash-register text-teal-400 mb-1 block text-sm"></i>Payment<div class="text-white mt-1">KES '+totalPaid.toLocaleString()+'</div></div>' +
+                    '<div class="text-slate-500 hidden sm:block"><i class="fa-solid fa-arrow-right"></i></div>' +
+                    '<div class="p-2 bg-brand-500 rounded border border-emerald-600/40 w-full sm:w-auto bg-emerald-950/20"><i class="fa-solid fa-percent text-emerald-400 mb-1 block text-sm"></i>Margin<div class="text-emerald-400 mt-1">'+marginPct.toFixed(1)+'%</div></div>' +
+                '</div>' +
+            '</div>';
+
+            // Derived Numbers Grid
+            html += '<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">';
+            html += '<div class="p-3 bg-brand-900/40 rounded-lg border border-brand-600/30"><span>Invoiced Value</span><b class="block text-white text-base mt-1">KES '+totalInvoiced.toLocaleString()+'</b></div>';
+            html += '<div class="p-3 bg-brand-900/40 rounded-lg border border-brand-600/30"><span>Cash Collected</span><b class="block text-emerald-400 text-base mt-1">KES '+totalPaid.toLocaleString()+'</b></div>';
+            html += '<div class="p-3 bg-brand-900/40 rounded-lg border border-brand-600/30"><span>Total Costs</span><b class="block text-rose-300 text-base mt-1">KES '+(materialsCost+laborCost).toLocaleString()+'</b><small class="text-[9px] text-slate-500">Materials + Labour</small></div>';
+            html += '<div class="p-3 bg-brand-900/40 rounded-lg border border-emerald-600/30 bg-emerald-950/10"><span>Actual Gross Margin</span><b class="block text-emerald-300 text-base mt-1">KES '+grossMargin.toLocaleString()+' ('+marginPct.toFixed(1)+'%)</b></div>';
+            html += '</div>';
+
+            // Detailed breakdowns & Counts
+            html += '<div class="grid md:grid-cols-2 gap-3">';
+            html += '<div class="p-3 bg-brand-900/30 rounded-lg border border-brand-600/20 space-y-2">' +
+                '<h4 class="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Object Counts</h4>' +
+                '<div class="grid grid-cols-2 gap-2 text-[10px]">' +
+                    '<div>Tasks: <strong class="text-white">'+projTasks.length+'</strong></div>' +
+                    '<div>Materials: <strong class="text-white">'+projMaterials.length+'</strong></div>' +
+                    '<div>Invoices: <strong class="text-white">'+projInvoices.length+'</strong></div>' +
+                    '<div>Payments: <strong class="text-white">'+projPayments.length+'</strong></div>' +
+                '</div>' +
+                '<div class="text-[10px] text-slate-400 pt-1">Outstanding Invoice Balance: <strong class="text-rose-300">KES '+totalOutstanding.toLocaleString()+'</strong></div>' +
+            '</div>';
+
+            // Navigation Links
+            html += '<div class="p-3 bg-brand-900/30 rounded-lg border border-brand-600/20 space-y-2 flex flex-col justify-between">' +
+                '<h4 class="font-bold text-[10px] text-slate-400 uppercase tracking-wider">Direct Workspace Navigation</h4>' +
+                '<div class="flex flex-wrap gap-2">' +
+                    '<button onclick="switchModuleView(\'finance\')" class="lifecycle-btn !py-1.5 !px-3 text-[10px] !bg-brand-900 hover:!bg-brand-600"><i class="fa-solid fa-file-invoice-dollar mr-1"></i>Finance Workspace</button>' +
+                    '<button onclick="switchModuleView(\'finance\')" class="lifecycle-btn !py-1.5 !px-3 text-[10px] !bg-brand-900 hover:!bg-brand-600"><i class="fa-solid fa-receipt mr-1"></i>Invoice Ledger</button>' +
+                    '<button onclick="switchModuleView(\'lifecycle\')" class="lifecycle-btn !py-1.5 !px-3 text-[10px] !bg-brand-900 hover:!bg-brand-600"><i class="fa-solid fa-diagram-project mr-1"></i>Project 360 Workspace</button>' +
+                '</div>' +
+            '</div>';
+            html += '</div>';
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function renderV15Technician360() {
+            const container = document.getElementById('v15Technician360');
+            if (!container) return;
+            const select = document.getElementById('v15TechnicianSelect');
+            if (!select || !select.value) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic p-3">No technician selected.</div>';
+                return;
+            }
+            const techId = select.value;
+            const user = (currentState.users || {})[techId];
+            if (!user) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic p-3">Technician details not found.</div>';
+                return;
+            }
+
+            const tenantID = currentUser.tenant_id;
+            const techTasks = Object.values(currentState.tasks || {}).filter(t => t.assigned_to === techId);
+            const openTasks = techTasks.filter(t => t.status !== 'Completed' && t.status !== 'Approved');
+            const overdueTasks = techTasks.filter(t => t.status !== 'Completed' && t.status !== 'Approved' && t.due_date && new Date(t.due_date) < new Date());
+            const techTimesheets = Object.values(currentState.timesheets || {}).filter(ts => ts.user_id === techId);
+
+            let html = '<div class="space-y-4 font-sans text-xs text-slate-300">';
+
+            // Header Stats
+            html += '<div class="grid grid-cols-3 gap-2 bg-brand-900/60 p-3 rounded-lg border border-brand-600/50">' +
+                '<div><span class="text-slate-400 block uppercase tracking-wider text-[9px]">Technician</span><b class="text-white text-sm">'+erpEscape(user.name)+'</b></div>' +
+                '<div><span class="text-slate-400 block uppercase tracking-wider text-[9px]">Region</span><span class="text-white font-bold">'+erpEscape(user.region || '-')+'</span></div>' +
+                '<div><span class="text-slate-400 block uppercase tracking-wider text-[9px]">Open/Overdue Jobs</span><span class="text-white font-bold">'+openTasks.length+' / <strong class="text-rose-400">'+overdueTasks.length+'</strong></span></div>' +
+                '</div>';
+
+            // Jobs and timesheets list
+            html += '<div class="grid md:grid-cols-2 gap-3">';
+            html += '<div><h4 class="font-bold text-[10px] text-amber-400 uppercase tracking-wider mb-1">Assigned Tasks / Jobs</h4>' +
+                '<div class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">' +
+                techTasks.map(t => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span>'+erpEscape(t.title)+'</span><span class="lifecycle-chip !text-[9px]">'+erpEscape(t.status)+'</span></div>').join('') +
+                (techTasks.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No assigned tasks.</div>' : '') +
+                '</div></div>';
+
+            html += '<div><h4 class="font-bold text-[10px] text-sky-400 uppercase tracking-wider mb-1">Attendance &amp; Hours Logged</h4>' +
+                '<div class="space-y-1.5 max-h-[150px] overflow-y-auto pr-1">' +
+                techTimesheets.map(ts => '<div class="p-2 bg-brand-900/40 rounded border border-brand-600/30 flex justify-between items-center"><span>Hours: <strong>'+ts.hours+'</strong> on '+new Date(ts.date || ts.worked_on).toLocaleDateString()+'</span><span class="lifecycle-chip">'+erpEscape(ts.status)+'</span></div>').join('') +
+                (techTimesheets.length === 0 ? '<div class="text-[10px] text-slate-500 italic">No logged hours.</div>' : '') +
+                '</div></div>';
+            html += '</div>';
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
         function renderDashboard() {
             const activeRole = currentUser.role_name;
             const activeTenant = currentUser.tenant_id;
@@ -1996,15 +2811,19 @@ const htmlContent = `
             const activeRolePermissions = currentState.roles[activeRole] || [];
 
             const navItems = [
-                { id: 'dashboard', label: 'Dashboard Home', icon: 'fa-chart-line' },
-                { id: 'inventory', label: 'Inventory Control', icon: 'fa-boxes-stacked', perm: 'inventory:read' },
-                { id: 'finance', label: 'Finance & Payments', icon: 'fa-file-invoice-dollar', perm: 'finance:read' },
-                { id: 'tasks', label: 'Tasks & Requisitions', icon: 'fa-list-check', perm: 'tasks:read' },
-                { id: 'customers', label: 'Customer CRM', icon: 'fa-users', perm: 'users:*' },
-                { id: 'users', label: 'Personnel Profiles', icon: 'fa-user-gear', perm: 'users:*' },
-                { id: 'rbac', label: 'RBAC Policy Config', icon: 'fa-shield-halved', perm: 'users:*' }
+                { id: 'dashboard', label: 'Command Center', icon: 'fa-chart-line', group:'Overview' },
+                { id: 'customers', label: 'Customer CRM', icon: 'fa-users', perm: 'users:*', group:'Commercial' },
+                { id: 'lifecycle', label: 'Customer / Project Lifecycle', icon: 'fa-route', perm: 'tasks:read', group:'Commercial' },
+                { id: 'tasks', label: 'Tasks & Requisitions', icon: 'fa-list-check', perm: 'tasks:read', group:'Operations' },
+                { id: 'inventory', label: 'Inventory Control', icon: 'fa-boxes-stacked', perm: 'inventory:read', group:'Operations' },
+                { id: 'approvals', label: 'Approval Center', icon: 'fa-stamp', group:'Governance' },
+                { id: 'finance', label: 'Finance & Payments', icon: 'fa-file-invoice-dollar', perm: 'finance:read', group:'Finance' },
+                { id: 'profitability', label: 'Job Profitability', icon: 'fa-chart-pie', perm: 'finance:read', group:'Finance' },
+                { id: 'users', label: 'Personnel Profiles', icon: 'fa-user-gear', perm: 'users:*', group:'Administration' },
+                { id: 'rbac', label: 'RBAC Policy Config', icon: 'fa-shield-halved', perm: 'users:*', group:'Administration' }
             ];
 
+            let lastNavGroup = '';
             navItems.forEach(n => {
                 const isCleared = !n.perm ||
                     activeRolePermissions.includes(n.perm) ||
@@ -2012,6 +2831,13 @@ const htmlContent = `
                     activeRolePermissions.some(p => p.endsWith(':*') && n.perm && n.perm.startsWith(p.slice(0, -2)));
                 if (!isCleared) return;
 
+                if (n.group !== lastNavGroup) {
+                    const group = document.createElement('div');
+                    group.className = 'erp-nav-section';
+                    group.textContent = n.group;
+                    sidebarNav.appendChild(group);
+                    lastNavGroup = n.group;
+                }
                 const btn = document.createElement('button');
                 btn.id = 'navLink_' + n.id;
                 btn.onclick = () => switchModuleView(n.id);
@@ -2034,6 +2860,14 @@ const htmlContent = `
             let pendingApprovals = 0;
             Object.values(currentState.timesheets || {}).forEach(ts => { if (ts.tenant_id === activeTenant && ts.status === 'Submitted') pendingApprovals++; });
             document.getElementById('stat_tasks_cnt').innerText = pendingApprovals;
+            const execProjects = (currentExecution && currentExecution.projects) ? Object.values(currentExecution.projects).filter(x => x.tenant_id === activeTenant) : [];
+            const heroOpen = execProjects.filter(x => !['Completed','Cancelled'].includes(x.status)).length;
+            const approvalCount = Number((document.getElementById('erpApprovalKpis')?.querySelector('[data-pending]')?.textContent || 0));
+            const heroExec = document.getElementById('heroExecutionStat'); if(heroExec) heroExec.textContent = heroOpen;
+            const heroApproval = document.getElementById('heroApprovalStat'); if(heroApproval) heroApproval.textContent = pendingApprovals;
+            const heroFinance = document.getElementById('heroFinanceStat'); if(heroFinance) heroFinance.textContent = 'KSh ' + finSum.toLocaleString();
+            const heroCustomers = document.getElementById('heroCustomerStat'); if(heroCustomers) heroCustomers.textContent = Object.values(currentState.customers || {}).filter(x => x.tenant_id === activeTenant).length;
+            const contextTenant = document.getElementById('erpContextTenant'); if(contextTenant) contextTenant.textContent = currentUser?.tenant_id || activeTenant || 'Workspace';
 
             // Render Policy Config manager
             const policyGrid = document.getElementById('policyConfigGrid');
@@ -2535,23 +3369,48 @@ const htmlContent = `
             }
         }
 
+        async function governanceDecision(instanceId, action, reason = '') {
+            try {
+                const res = await fetch('/api/workflows/decision', {
+                    method: 'POST',
+                    headers: currentHeaders,
+                    body: JSON.stringify({ instance_id: instanceId, action, reason })
+                });
+                const r = await res.json();
+                if (!res.ok) throw new Error(r.error || r.message || 'Governance action failed');
+                pushNotification('WORKFLOW_' + action.toUpperCase(), 'Workflow ' + action + 'd successfully.');
+                await renderApprovalCenter();
+                setTimeout(fetchState, 800);
+            } catch (err) {
+                alert(err.message);
+            }
+        }
+
+        // Compatibility actions now enter the first-class governance ledger.
         async function approveTimesheet(timesheetId) {
             try {
                 const res = await fetch('/api/tasks/timesheets/approve', {
-                    method: 'POST',
-                    headers: currentHeaders,
+                    method: 'POST', headers: currentHeaders,
                     body: JSON.stringify({ timesheet_id: timesheetId })
                 });
                 const r = await res.json();
-                if (res.ok) {
-                    pushNotification('TIMESHEET_QUEUED', 'Approval of timesheet ' + timesheetId + ' published to NATS.');
-                    setTimeout(fetchState, 1500);
-                } else {
-                    alert('Authorization Error: ' + (r.error || r.message));
-                }
-            } catch (err) {
-                console.error('Failed timesheet approval:', err);
-            }
+                if (!res.ok) throw new Error(r.error || r.message || 'Timesheet workflow creation failed');
+                pushNotification('TIMESHEET_WORKFLOW', 'Timesheet submitted to the governance queue.');
+                await renderApprovalCenter();
+            } catch (err) { alert(err.message); }
+        }
+
+        async function approveMaterial(requestId) {
+            try {
+                const res = await fetch('/api/tasks/materials/approve', {
+                    method: 'POST', headers: currentHeaders,
+                    body: JSON.stringify({ request_id: requestId })
+                });
+                const r = await res.json();
+                if (!res.ok) throw new Error(r.error || r.message || 'Material workflow approval failed');
+                pushNotification('MATERIAL_APPROVED', 'Material workflow approved. Execute it to release the JetStream command.');
+                await renderApprovalCenter();
+            } catch (err) { alert(err.message); }
         }
 
         function openMaterialRequestModal(taskId) {
@@ -2602,6 +3461,69 @@ const htmlContent = `
                 }
             } catch (err) {
                 console.error(err);
+            }
+        }
+
+        async function renderProfitability() {
+            const k=document.getElementById('profitabilityKpis'), rows=document.getElementById('profitabilityRows'), ledger=document.getElementById('ledgerRows');
+            if(!k||!rows||!ledger||!currentUser)return;
+            try{
+                const [pr,lr]=await Promise.all([fetch('/api/profitability',{headers:currentHeaders}),fetch('/api/ledger',{headers:currentHeaders})]);
+                if(!pr.ok||!lr.ok)throw new Error('Unable to load finance ledger');
+                const data=await pr.json(), entries=await lr.json();
+                const totals=data.reduce((a,x)=>({r:a.r+x.revenue,m:a.m+x.material_cost,l:a.l+x.labor_cost,g:a.g+x.gross_margin}),{r:0,m:0,l:0,g:0});
+                k.innerHTML=[['Revenue',totals.r,'text-emerald-300'],['Material cost',totals.m,'text-amber-300'],['Labour cost',totals.l,'text-sky-300'],['Gross margin',totals.g,totals.g>=0?'text-emerald-300':'text-rose-300']].map(x=>'<div class="p-4 rounded-xl bg-brand-900 border border-brand-600"><span class="text-[10px] uppercase text-slate-500">'+x[0]+'</span><b class="block text-lg '+x[2]+' mt-1">KSh '+Number(x[1]).toLocaleString(undefined,{maximumFractionDigits:2})+'</b></div>').join('');
+                rows.innerHTML=data.map(x=>'<tr class="border-b border-brand-600/60"><td class="py-3"><b class="text-white">'+erpEscape(x.task_title)+'</b><div class="text-[10px] text-slate-500">'+erpEscape(x.task_id)+'</div></td><td>KSh '+Number(x.revenue).toLocaleString()+'</td><td>KSh '+Number(x.material_cost).toLocaleString()+'</td><td>KSh '+Number(x.labor_cost).toLocaleString()+'</td><td class="font-bold '+(x.gross_margin>=0?'text-emerald-300':'text-rose-300')+'">KSh '+Number(x.gross_margin).toLocaleString()+'</td><td>'+Number(x.margin_pct).toFixed(1)+'%</td></tr>').join('')||'<tr><td colspan="6" class="py-6 text-center text-slate-500">No ledger activity yet.</td></tr>';
+                ledger.innerHTML=entries.slice(0,30).map(e=>'<div class="flex items-center justify-between gap-4 p-3 rounded-lg bg-brand-900 border border-brand-600"><div><b class="text-xs text-white">'+erpEscape(e.account)+'</b><div class="text-[10px] text-slate-500">'+erpEscape(e.transaction_id)+' · '+erpEscape(e.reference||'')+'</div></div><div class="text-right"><b class="text-xs '+(e.entry_type==='CREDIT'?'text-emerald-300':'text-amber-300')+'">'+e.entry_type+' KSh '+Number(e.amount).toLocaleString()+'</b><div class="text-[10px] text-slate-500">'+new Date(e.created_at).toLocaleString()+'</div></div></div>').join('')||'<div class="text-xs text-slate-500">No transactions recorded.</div>';
+            }catch(err){ k.innerHTML=''; rows.innerHTML='<tr><td colspan="6" class="py-6 text-center text-rose-300">'+erpEscape(err.message)+'</td></tr>'; ledger.innerHTML=''; }
+        }
+
+        async function renderApprovalCenter() {
+            const elK = document.getElementById('erpApprovalKpis');
+            const elG = document.getElementById('erpApprovalGrid');
+            if (!elK || !elG || !currentUser) return;
+            try {
+                const res = await fetch('/api/workflows', { headers: currentHeaders });
+                if (!res.ok) throw new Error('Unable to load governance workflows');
+                const workflows = await res.json();
+                const active = Array.isArray(workflows) ? workflows : [];
+                const counts = {
+                    pending: active.filter(w => ['REQUESTED','APPROVED','EXECUTED'].includes(w.status)).length,
+                    requested: active.filter(w => w.status === 'REQUESTED').length,
+                    approved: active.filter(w => w.status === 'APPROVED').length,
+                    executed: active.filter(w => w.status === 'EXECUTED').length
+                };
+                elK.innerHTML = [
+                    ['Open controls', counts.pending, 'fa-inbox'],
+                    ['Awaiting checker', counts.requested, 'fa-user-check'],
+                    ['Approved / gated', counts.approved, 'fa-lock'],
+                    ['Executed / reconcile', counts.executed, 'fa-circle-check']
+                ].map(x => '<div class="erp-approval-kpi"><b>' + x[1] + '</b><span><i class="fa-solid ' + x[2] + ' mr-1"></i>' + x[0] + '</span></div>').join('');
+
+                const esc = erpEscape;
+                const rows = active.slice(0, 100).map(w => {
+                    const status = esc(w.status);
+                    let action = '<span class="erp-chip">' + status + '</span>';
+                    if (w.status === 'REQUESTED') {
+                        action = '<button class="erp-approval-action" onclick="governanceDecision(\'' + esc(w.id) + '\',\'approve\')">Approve</button>' +
+                                 '<button class="erp-approval-action secondary" onclick="governanceDecision(\'' + esc(w.id) + '\',\'return\',\'Needs correction\')">Return</button>';
+                    } else if (w.status === 'APPROVED') {
+                        action = '<button class="erp-approval-action" onclick="governanceDecision(\'' + esc(w.id) + '\',\'execute\')">Execute</button>';
+                    } else if (w.status === 'EXECUTED') {
+                        action = '<button class="erp-approval-action secondary" onclick="governanceDecision(\'' + esc(w.id) + '\',\'reconcile\')">Reconcile</button>';
+                    }
+                    return '<div class="erp-approval-row">' +
+                        '<div class="erp-approval-main">' +
+                        '<div class="erp-approval-id">' + esc(w.workflow_key) + ' · ' + esc(w.id) + '</div>' +
+                        '<div class="erp-approval-item">' + esc(w.entity_type) + ' / ' + esc(w.entity_id) + '</div>' +
+                        '<div class="erp-approval-meta">Status ' + status + ' · requester ' + esc(w.requested_by) + ' · updated ' + (w.updated_at ? new Date(w.updated_at).toLocaleString() : '-') + '</div>' +
+                        '</div><div class="flex gap-2 flex-wrap justify-end">' + action + '</div></div>';
+                }).join('');
+                elG.innerHTML = '<section class="erp-approval-card md:col-span-2"><div class="erp-approval-card-head"><div class="erp-approval-card-title"><i class="fa-solid fa-shield-halved text-amber-300 mr-2"></i>Governed command queue</div><span class="erp-approval-count">' + active.length + '</span></div>' +
+                    (rows || '<div class="erp-approval-empty">No workflow instances are currently open.</div>') + '</section>';
+            } catch (err) {
+                elK.innerHTML = '';
+                elG.innerHTML = '<div class="erp-approval-empty">Governance queue unavailable: ' + erpEscape(err.message) + '</div>';
             }
         }
 
@@ -3085,7 +4007,180 @@ const htmlContent = `
         }, 5000);
 
         initAuth();
-    </script>
+
+
+// --- ERP premium interaction layer ---
+function erpOpenJob360(taskId){
+    const body=document.getElementById('erpJob360Body'); if(!body||!currentState)return;
+    const tenant=currentUser.tenant_id, t=currentState.tasks?.[taskId];
+    if(!t||t.tenant_id!==tenant)return;
+    const users=Object.values(currentState.users||{}), user=users.find(u=>u.id===t.assigned_to);
+    const notes=Object.values(currentState.invoice_notes||{}).filter(n=>n.tenant_id===tenant&&n.task_id===t.id);
+    const material=Object.values(currentState.material_requests||{}).filter(m=>m.tenant_id===tenant&&m.task_id===t.id);
+    const times=Object.values(currentState.timesheets||{}).filter(x=>x.tenant_id===tenant&&x.task_id===t.id);
+    const note=notes[0], inv=note?Object.values(currentState.invoices||{}).find(i=>i.tenant_id===tenant&&i.id===note.invoice_id):null;
+    const customer=inv?Object.values(currentState.customers||{}).find(c=>c.tenant_id===tenant&&c.id===inv.customer_id):null;
+    const asset=note?.allocated_sn?Object.values(currentState.inventory||{}).find(i=>i.tenant_id===tenant&&i.serial_number===note.allocated_sn):null;
+    const dep=t.depends_on?currentState.tasks?.[t.depends_on]:null;
+    const pendingMaterials=material.filter(m=>m.status==='Pending_Leader_Approval').length;
+    const submittedTimes=times.filter(x=>x.status==='Submitted').length;
+    const due=t.due_date?new Date(t.due_date):null, risk=due&&due.getTime()<Date.now()&&t.status!=='Completed'&&t.status!=='Approved';
+    const status=erpStatusClass(t.status);
+    body.innerHTML='<div class="erp-job360-main">'+
+      '<div class="erp-job360-titleline"><div><div class="text-[10px] text-slate-500 font-mono">'+erpEscape(t.id)+'</div><div class="text-lg font-extrabold text-white mt-1">'+erpEscape(t.title)+'</div><div class="text-[10px] text-slate-500 mt-1">'+erpEscape(t.region||'No region')+' · Created by '+erpEscape(users.find(u=>u.id===t.created_by)?.name||t.created_by||'system')+'</div></div><span class="erp-status '+status+'">'+erpEscape(t.status)+'</span></div>'+
+      '<div class="erp-job360-meta"><div class="erp-job360-stat"><span>Technician</span><b>'+erpEscape(user?.name||t.assigned_to||'Unassigned')+'</b></div><div class="erp-job360-stat"><span>Due</span><b class="'+(risk?'text-rose-400':'')+'">'+erpEscape(due?due.toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'Not scheduled')+'</b></div><div class="erp-job360-stat"><span>Dependency</span><b>'+erpEscape(dep?dep.title:'None')+'</b></div></div>'+
+      '<div class="erp-job360-actions">'+
+      (t.status==='Pending'?'<button class="erp-action primary" onclick="erpAdvanceTask(\''+erpEscape(t.id)+'\',\'Pending\')"><i class="fa-solid fa-play"></i> Start work</button>':'')+
+      (t.status==='In_Progress'?'<button class="erp-action primary" onclick="erpAdvanceTask(\''+erpEscape(t.id)+'\',\'In_Progress\')"><i class="fa-solid fa-check"></i> Complete</button>':'')+
+      '<button class="erp-action" onclick="openMaterialRequestModal(\''+erpEscape(t.id)+'\')"><i class="fa-solid fa-boxes-stacked"></i> Materials</button>'+
+      '</div></div>'+
+      '<div class="erp-job360-side">'+
+      '<div class="erp-job360-item"><div class="erp-job360-item-label">Customer</div><div class="erp-job360-item-value">'+erpEscape(customer?.name||'Not linked')+'</div></div>'+
+      '<div class="erp-job360-item"><div class="erp-job360-item-label">Contact</div><div class="erp-job360-item-value">'+erpEscape(customer?.phone||customer?.email||'—')+'</div></div>'+
+      '<div class="erp-job360-item"><div class="erp-job360-item-label">Asset / Serial</div><div class="erp-job360-item-value">'+erpEscape(asset?.serial_number||note?.allocated_sn||'Not issued')+'</div></div>'+
+      '<div class="erp-job360-item"><div class="erp-job360-item-label">Materials</div><div class="erp-job360-item-value">'+material.length+' request(s)'+(pendingMaterials?' · '+pendingMaterials+' awaiting approval':'')+'</div></div>'+
+      '<div class="erp-job360-item"><div class="erp-job360-item-label">Timesheets</div><div class="erp-job360-item-value">'+times.length+' logged'+(submittedTimes?' · '+submittedTimes+' pending':'')+'</div></div>'+
+      '<div class="erp-job360-item"><div class="erp-job360-item-label">Billing</div><div class="erp-job360-item-value">'+erpEscape(inv?(inv.status+' · KSh '+Number(inv.balance_amount||0).toLocaleString()):'No invoice linked')+'</div></div>'+
+      '</div>';
+    body.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function erpClearJob360(){const body=document.getElementById('erpJob360Body');if(body)body.innerHTML='<div class="erp-job360-empty">Select a task from the command board to open its operational context.</div>'}
+
+function erpToast(title, message, type) {
+    const stack=document.getElementById('erpToastStack'); if(!stack) return;
+    const el=document.createElement('div'); el.className='erp-toast '+(type==='err'?'err':'ok');
+    el.innerHTML='<div class="mt-0.5">'+(type==='err'?'<i class="fa-solid fa-circle-exclamation text-rose-400"></i>':'<i class="fa-solid fa-circle-check text-emerald-400"></i>')+'</div><div><div class="erp-toast-title">'+title+'</div><div class="erp-toast-msg">'+message+'</div></div>';
+    stack.appendChild(el); setTimeout(()=>el.remove(),4200);
+}
+function erpEscape(v){return String(v??'').replace(/[&<>'"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]})}
+function erpStatusClass(s){if(s==='Completed'||s==='Approved')return 'done';if(s==='In_Progress')return 'progress';return 'pending'}
+function erpCan(permission){const perms=(currentState&&currentState.roles&&currentState.roles[currentUser.role_name])||[];return perms.includes('*')||perms.includes(permission)||perms.includes(permission.split(':')[0]+':*')}
+function applyERPPermissions(){const btns=document.querySelectorAll('#erpCommandBar .erp-action');if(btns[0])btns[0].style.display=erpCan('tasks:create')?'flex':'none';if(btns[1])btns[1].style.display=erpCan('inventory:write')?'flex':'none';if(btns[2])btns[2].style.display=erpCan('finance:write')?'flex':'none'}
+function renderERPWorkCenter(){
+    const q=document.getElementById('erpWorkQueue'), hp=document.getElementById('erpHealthPanel'); if(!q||!hp||!currentState) return;
+    const tenant=currentUser.tenant_id, uid=currentUser.id;
+    const tasks=Object.values(currentState.tasks||{}).filter(t=>t.tenant_id===tenant);
+    const mine=tasks.filter(t=>t.assigned_to===uid || currentUser.role_name==='tenant_admin' || currentUser.role_name==='manager').sort((a,b)=>{
+        const da=a.due_date?new Date(a.due_date).getTime():Infinity, db=b.due_date?new Date(b.due_date).getTime():Infinity; return da-db;
+    }).filter(t=>t.status!=='Completed'&&t.status!=='Approved').slice(0,6);
+    if(!mine.length){q.innerHTML='<div class="p-5 text-center text-xs text-slate-500"><i class="fa-solid fa-circle-check text-emerald-400 text-xl mb-2"></i><div>No active work in the queue.</div></div>'}
+    else q.innerHTML=mine.map(t=>{
+        const due=t.due_date?new Date(t.due_date):null, overdue=due&&due.getTime()<Date.now();
+        return '<div class="erp-task-row"><div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0"><i class="fa-solid fa-briefcase text-emerald-400 text-xs"></i></div><div class="erp-task-main"><div class="erp-task-title">'+erpEscape(t.title)+'</div><div class="erp-task-meta">'+(due?(overdue?'Overdue · ':'Due ')+due.toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'No due date')+'</div></div><span class="erp-status '+erpStatusClass(t.status)+'">'+erpEscape(t.status||'Pending')+'</span><button class="erp-mini-btn" onclick="erpAdvanceTask(\''+erpEscape(t.id)+'\',\''+erpEscape(t.status||'Pending')+'\')">Advance</button></div>'
+    }).join('');
+    const inventory=Object.values(currentState.inventory||{}).filter(i=>i.tenant_id===tenant), low=inventory.filter(i=>i.status==='In_Stock').length;
+    const overdue=Object.values(currentState.overdue_tasks||{}).filter(t=>t.tenant_id===tenant).length;
+    const approvals=Object.values(currentState.material_requests||{}).filter(m=>m.tenant_id===tenant&&m.status==='Pending_Leader_Approval').length + Object.values(currentState.timesheets||{}).filter(t=>t.tenant_id===tenant&&t.status==='Submitted').length;
+    hp.innerHTML='<div class="flex items-center justify-between p-3 rounded-xl bg-brand-900 border border-brand-600"><span class="text-xs text-slate-400">Overdue work</span><b class="text-sm '+(overdue?'text-rose-400':'text-emerald-400')+'">'+overdue+'</b></div><div class="flex items-center justify-between p-3 rounded-xl bg-brand-900 border border-brand-600"><span class="text-xs text-slate-400">Stock units</span><b class="text-sm text-sky-300">'+inventory.length+'</b></div><div class="flex items-center justify-between p-3 rounded-xl bg-brand-900 border border-brand-600"><span class="text-xs text-slate-400">Approval queue</span><b class="text-sm text-amber-300">'+approvals+'</b></div>';
+}
+function openQuickTaskModal(){
+    const m=document.getElementById('erpQuickTaskModal'), a=document.getElementById('erpTaskAssignee'), d=document.getElementById('erpTaskDependency'); if(!m||!a||!d)return;
+    const users=Object.values(currentState.users||{}).filter(u=>u.tenant_id===currentUser.tenant_id&&u.id!==currentUser.id);
+    a.innerHTML='<option value="">Select teammate…</option>'+users.map(u=>'<option value="'+erpEscape(u.id)+'">'+erpEscape(u.name)+' · '+erpEscape(u.role_name)+'</option>').join('');
+    const tasks=Object.values(currentState.tasks||{}).filter(t=>t.tenant_id===currentUser.tenant_id&&t.status!=='Completed'&&t.status!=='Approved');
+    d.innerHTML='<option value="">No dependency</option>'+tasks.map(t=>'<option value="'+erpEscape(t.id)+'">'+erpEscape(t.title)+'</option>').join('');
+    const due=new Date(Date.now()+86400000); due.setMinutes(due.getMinutes()-due.getTimezoneOffset()); document.getElementById('erpTaskDue').value=due.toISOString().slice(0,16);
+    m.classList.remove('hidden'); setTimeout(()=>document.getElementById('erpTaskTitle')?.focus(),50);
+}
+function closeQuickTaskModal(){document.getElementById('erpQuickTaskModal')?.classList.add('hidden')}
+async function submitQuickTask(e){e.preventDefault();
+    const payload={title:document.getElementById('erpTaskTitle').value.trim(),assigned_to:document.getElementById('erpTaskAssignee').value,due_date:new Date(document.getElementById('erpTaskDue').value).toISOString(),depends_on:document.getElementById('erpTaskDependency').value};
+    try{const res=await fetch('/api/tasks',{method:'POST',headers:{...currentHeaders,'Content-Type':'application/json'},body:JSON.stringify(payload)});const r=await res.json();if(!res.ok)throw new Error(r.error||'Unable to create task');closeQuickTaskModal();erpToast('Task created','The task was queued for processing.','ok');setTimeout(fetchState,350)}catch(err){erpToast('Task creation failed',err.message,'err')}
+}
+async function erpAdvanceTask(id,status){const next=status==='Pending'?'In_Progress':status==='In_Progress'?'Completed':status;if(next===status)return;try{const res=await fetch('/api/tasks/status',{method:'POST',headers:{...currentHeaders,'Content-Type':'application/json'},body:JSON.stringify({task_id:id,status:next})});const r=await res.json();if(!res.ok)throw new Error(r.error||'Status update failed');erpToast('Task updated','Status change queued: '+next,'ok');setTimeout(fetchState,400)}catch(e){erpToast('Task update failed',e.message,'err')}}
+function erpGlobalSearch(q){
+    const box=document.getElementById('erpSearchResults'); if(!box)return; q=(q||'').trim().toLowerCase(); if(!q){box.style.display='none';return}
+    const tenant=currentUser.tenant_id, rows=[]; Object.values(currentState.tasks||{}).filter(x=>x.tenant_id===tenant).forEach(x=>{if((x.title||'').toLowerCase().includes(q))rows.push({type:'Task',title:x.title,meta:x.status||'',view:'tasks'})}); Object.values(currentState.inventory||{}).filter(x=>x.tenant_id===tenant).forEach(x=>{if((x.name||'').toLowerCase().includes(q)||(x.serial_number||'').toLowerCase().includes(q))rows.push({type:'Asset',title:x.name+' · '+x.serial_number,meta:x.status||'',view:'inventory'})}); Object.values(currentState.customers||{}).filter(x=>x.tenant_id===tenant).forEach(x=>{if((x.name||'').toLowerCase().includes(q)||(x.phone||'').toLowerCase().includes(q))rows.push({type:'Customer',title:x.name,meta:x.phone||x.email||'',view:'customers'})});
+    box.innerHTML=rows.slice(0,8).map(x=>'<div class="erp-result" onclick="switchModuleView(\''+x.view+'\');document.getElementById(\'erpSearchResults\').style.display=\'none\';document.getElementById(\'erpGlobalSearch\').value=\'\'"><div class="erp-result-title">'+erpEscape(x.title)+'</div><div class="erp-result-meta">'+erpEscape(x.type)+' · '+erpEscape(x.meta)+'</div></div>').join('')||'<div class="p-4 text-xs text-slate-500">No matching records.</div>'; box.style.display='block';
+}
+document.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();document.getElementById('erpGlobalSearch')?.focus()}if(e.key==='Escape'){document.getElementById('erpSearchResults')?.style.setProperty('display','none');closeQuickTaskModal()}});
+document.addEventListener('click',function(e){const s=document.getElementById('erpSearchResults'),i=document.getElementById('erpGlobalSearch');if(s&&i&&!s.contains(e.target)&&e.target!==i)s.style.display='none'});
+
+let erpTaskFilter='all';
+function setERPTaskFilter(filter,btn){
+    erpTaskFilter=filter;
+    document.querySelectorAll('.erp-task-filter').forEach(x=>x.classList.remove('active'));
+    if(btn)btn.classList.add('active');
+    renderERPTaskCenter();
+}
+function erpTaskRisk(t){
+    if(!t||!t.due_date)return false;
+    if(t.status==='Completed'||t.status==='Approved')return false;
+    const due=new Date(t.due_date), now=new Date(), hours=(due-now)/3600000;
+    return hours<0 || hours<=24;
+}
+function erpTaskDueLabel(t){
+    if(!t.due_date)return 'No SLA';
+    const due=new Date(t.due_date), diff=due-Date.now(), hrs=Math.round(Math.abs(diff)/3600000);
+    if(diff<0)return hrs<24?'Overdue':'Overdue '+Math.floor(hrs/24)+'d';
+    if(hrs<24)return 'Due in '+Math.max(1,hrs)+'h';
+    return 'Due '+due.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+}
+function renderERPTaskCenter(){
+    const board=document.getElementById('erpTaskBoard'); if(!board||!currentState||!currentUser)return;
+    const tenant=currentUser.tenant_id;
+    let tasks=Object.values(currentState.tasks||{}).filter(t=>t.tenant_id===tenant);
+    const assignee=document.getElementById('erpTaskAssigneeFilter');
+    const selected=assignee?.value||'';
+    if(selected)tasks=tasks.filter(t=>t.assigned_to===selected);
+    if(erpTaskFilter==='risk')tasks=tasks.filter(erpTaskRisk);
+    else if(erpTaskFilter!=='all')tasks=tasks.filter(t=>t.status===erpTaskFilter);
+    const allTasks=Object.values(currentState.tasks||{}).filter(t=>t.tenant_id===tenant);
+    const overdue=allTasks.filter(erpTaskRisk).length;
+    const pending=allTasks.filter(t=>t.status==='Pending').length;
+    const progress=allTasks.filter(t=>t.status==='In_Progress').length;
+    const completed=allTasks.filter(t=>t.status==='Completed'||t.status==='Approved').length;
+    const submitted=Object.values(currentState.timesheets||{}).filter(x=>x.tenant_id===tenant&&x.status==='Submitted').length;
+    const k=document.getElementById('erpTaskKpis');
+    if(k)k.innerHTML=[
+      ['Open work',pending+progress,''],
+      ['In progress',progress,''],
+      ['SLA risk',overdue,'risk'],
+      ['Completed',completed,''],
+      ['Approvals',submitted,'']
+    ].map(x=>'<div class="erp-task-kpi"><div class="erp-task-kpi-label">'+x[0]+'</div><div class="erp-task-kpi-value '+x[2]+'">'+x[1]+'</div></div>').join('');
+    if(assignee){
+      const prev=assignee.value;
+      assignee.innerHTML='<option value="">All technicians</option>'+Object.values(currentState.users||{}).filter(u=>u.tenant_id===tenant).map(u=>'<option value="'+erpEscape(u.id)+'">'+erpEscape(u.name)+'</option>').join('');
+      assignee.value=prev;
+    }
+    const lanes=[['Pending','Queued'],['In_Progress','In Progress'],['Completed','Completed']];
+    board.innerHTML=lanes.map(([status,label])=>{
+      const lane=tasks.filter(t=>(status==='Completed'?(t.status==='Completed'||t.status==='Approved'):t.status===status))
+        .sort((a,b)=>(erpTaskRisk(b)?1:0)-(erpTaskRisk(a)?1:0));
+      return '<div class="erp-task-lane"><div class="erp-task-lane-head"><span class="erp-task-lane-name">'+label+'</span><span class="erp-task-count">'+lane.length+'</span></div>'+
+        (lane.length?lane.map(t=>{
+          const user=currentState.users?.[t.assigned_to], risk=erpTaskRisk(t);
+          const dep=t.depends_on?currentState.tasks?.[t.depends_on]:null;
+          const blocked=dep&&dep.status!=='Completed'&&dep.status!=='Approved';
+          const next=t.status==='Pending'?'Start work':t.status==='In_Progress'?'Complete':'';
+          return '<div class="erp-task-card" onclick="erpOpenJob360(\''+erpEscape(t.id)+'\')" title="'+(blocked?'Blocked by '+erpEscape(dep.title):'Open Job 360')+'">'+
+            '<div class="erp-task-card-title">'+erpEscape(t.title)+'</div>'+
+            '<div class="erp-task-card-meta"><span>'+erpEscape(t.id)+'</span><span class="erp-task-person">'+erpEscape(user?.name||t.assigned_to||'Unassigned')+'</span></div>'+
+            '<div class="erp-task-card-foot"><span class="erp-task-due">'+erpEscape(erpTaskDueLabel(t))+'</span>'+
+            (blocked?'<span class="erp-task-risk">BLOCKED</span>':risk?'<span class="erp-task-risk">SLA RISK</span>':next?'<button class="erp-mini-btn" onclick="event.stopPropagation();erpAdvanceTask(\''+erpEscape(t.id)+'\',\''+erpEscape(t.status)+'\')">'+next+'</button>':'<span class="erp-chip">Closed</span>')+
+            '</div></div>';
+        }).join(''):'<div class="erp-task-empty">No work in this lane</div>')+'</div>';
+    }).join('');
+}
+const erpOriginalFetchState=typeof fetchState==='function'?fetchState:null;
+if(erpOriginalFetchState){const erpStateWrapper=async function(){await erpOriginalFetchState();renderERPWorkCenter();renderERPTaskCenter();applyERPPermissions()};fetchState=erpStateWrapper}
+
+</script>
+
+        <div id="erpQuickTaskModal" class="hidden fixed inset-0 flex items-center justify-center p-4">
+            <div class="erp-modal-backdrop absolute inset-0" onclick="closeQuickTaskModal()"></div>
+            <div class="relative w-full max-w-lg bg-brand-500 border border-brand-600 rounded-2xl shadow-2xl p-6">
+                <div class="flex items-center justify-between mb-5"><div><h3 class="text-lg font-bold text-white">Create task</h3><p class="text-xs text-slate-400 mt-1">Create and assign work without leaving the dashboard.</p></div><button onclick="closeQuickTaskModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+                <form onsubmit="submitQuickTask(event)" class="space-y-4">
+                    <div><label class="block text-xs font-bold text-slate-400 mb-1">Task title</label><input id="erpTaskTitle" required class="w-full bg-brand-900 border border-brand-600 rounded-lg px-3 py-2.5 text-sm text-white" placeholder="e.g. Install ONU at customer site"></div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3"><div><label class="block text-xs font-bold text-slate-400 mb-1">Assignee</label><select id="erpTaskAssignee" required class="w-full bg-brand-900 border border-brand-600 rounded-lg px-3 py-2.5 text-sm text-white"></select></div><div><label class="block text-xs font-bold text-slate-400 mb-1">Due date</label><input id="erpTaskDue" type="datetime-local" required class="w-full bg-brand-900 border border-brand-600 rounded-lg px-3 py-2.5 text-sm text-white"></div></div>
+                    <div><label class="block text-xs font-bold text-slate-400 mb-1">Depends on <span class="font-normal text-slate-500">optional</span></label><select id="erpTaskDependency" class="w-full bg-brand-900 border border-brand-600 rounded-lg px-3 py-2.5 text-sm text-white"><option value="">No dependency</option></select></div>
+                    <div class="flex justify-end gap-2 pt-2"><button type="button" onclick="closeQuickTaskModal()" class="erp-action">Cancel</button><button type="submit" class="erp-action primary"><i class="fa-solid fa-check"></i><span>Create task</span></button></div>
+                </form>
+            </div>
+        </div>
+        <div id="erpToastStack"></div>
 </body>
 </html>
 `
@@ -3277,3 +4372,74 @@ const activationHtmlContent = `
 </body>
 </html>
 `
+
+// GetCustomerLifecycle exposes the tenant-scoped commercial-to-CX chain.
+func (h *UIHandler) GetCustomerLifecycle(c echo.Context) error {
+	data, err := h.db.GetCustomerLifecycle(c.Request().Context(), c.Get(middleware.ContextTenantID).(string))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load customer/project lifecycle"})
+	}
+	return c.JSON(http.StatusOK, data)
+}
+
+// GetFieldServiceIntelligence exposes tenant-scoped operational KPIs derived from persisted ERP data.
+func (h *UIHandler) GetFieldServiceIntelligence(c echo.Context) error {
+	data, err := h.db.GetFieldServiceIntelligence(c.Request().Context(), c.Get(middleware.ContextTenantID).(string))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load field-service intelligence"})
+	}
+	return c.JSON(http.StatusOK, data)
+}
+
+type FieldAttendancePayload struct {
+	Action    string  `json:"action"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	PhotoURL  string  `json:"photo_url"`
+}
+type FieldJobEventPayload struct {
+	ProjectID            string  `json:"project_id"`
+	TaskID               string  `json:"task_id"`
+	EventType            string  `json:"event_type"`
+	Latitude             float64 `json:"latitude"`
+	Longitude            float64 `json:"longitude"`
+	PhotoURL             string  `json:"photo_url"`
+	CustomerSignatureURL string  `json:"customer_signature_url"`
+	Note                 string  `json:"note"`
+}
+
+func (h *UIHandler) GetFieldTelemetry(c echo.Context) error {
+	data, err := h.db.GetFieldTelemetry(c.Request().Context(), c.Get(middleware.ContextTenantID).(string))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load field telemetry"})
+	}
+	return c.JSON(http.StatusOK, data)
+}
+func (h *UIHandler) RecordFieldAttendance(c echo.Context) error {
+	var p FieldAttendancePayload
+	if err := c.Bind(&p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid attendance payload"})
+	}
+	if err := h.db.RecordFieldAttendance(c.Request().Context(), c.Get(middleware.ContextTenantID).(string), c.Get(middleware.ContextUserID).(string), p.Action, p.Latitude, p.Longitude, p.PhotoURL); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "recorded"})
+}
+func (h *UIHandler) RecordFieldJobEvent(c echo.Context) error {
+	var p FieldJobEventPayload
+	if err := c.Bind(&p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid job event payload"})
+	}
+	if err := h.db.RecordFieldJobEvent(c.Request().Context(), c.Get(middleware.ContextTenantID).(string), c.Get(middleware.ContextUserID).(string), p.ProjectID, p.TaskID, p.EventType, p.Latitude, p.Longitude, p.PhotoURL, p.CustomerSignatureURL, p.Note); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "recorded"})
+}
+
+func (h *UIHandler) GetProjectExecution(c echo.Context) error {
+	data, err := h.db.GetProjectExecution(c.Request().Context(), c.Get(middleware.ContextTenantID).(string))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load project execution control"})
+	}
+	return c.JSON(http.StatusOK, data)
+}

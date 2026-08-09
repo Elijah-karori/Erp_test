@@ -53,11 +53,11 @@ func ValidateAndLoad() *EnvConfig {
 	// Validate DB URL scheme
 	parsedURL, err := url.Parse(dbURL)
 	if err != nil || (parsedURL.Scheme != "postgres" && parsedURL.Scheme != "postgresql") {
-		log.Fatalf("\n============================================================\n" +
-			"ERROR: INVALID DATABASE CONNECTION STRING FORMAT\n" +
-			"============================================================\n" +
-			"The provided database connection string has an invalid scheme: %s\n" +
-			"DATABASE_URL must start with 'postgres://' or 'postgresql://'.\n" +
+		log.Fatalf("\n============================================================\n"+
+			"ERROR: INVALID DATABASE CONNECTION STRING FORMAT\n"+
+			"============================================================\n"+
+			"The provided database connection string has an invalid scheme: %s\n"+
+			"DATABASE_URL must start with 'postgres://' or 'postgresql://'.\n"+
 			"============================================================\n", dbURL)
 	}
 	cfg.DatabaseURL = dbURL
@@ -100,10 +100,10 @@ func ValidateAndLoad() *EnvConfig {
 	} else {
 		p, err := strconv.Atoi(portStr)
 		if err != nil {
-			log.Fatalf("\n============================================================\n" +
-				"ERROR: INVALID SMTP PORT CONFIGURATION\n" +
-				"============================================================\n" +
-				"SMTP_PORT must be a valid numeric port. Received: '%s'\n" +
+			log.Fatalf("\n============================================================\n"+
+				"ERROR: INVALID SMTP PORT CONFIGURATION\n"+
+				"============================================================\n"+
+				"SMTP_PORT must be a valid numeric port. Received: '%s'\n"+
 				"============================================================\n", portStr)
 		}
 		cfg.SMTPPort = p
