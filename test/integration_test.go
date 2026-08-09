@@ -462,13 +462,13 @@ func TestSerializedAssetWorkflows(t *testing.T) {
 	// Seed a task first
 	dueDate := time.Now().Add(48 * time.Hour)
 	task := &types.Task{
-		ID:         "task_billing_1",
-		TenantID:   "tenant_safari",
-		Title:      "FTTB Fiber Install",
-		CreatedBy:  "usr_safari_admin",
-		Status:     "In_Progress",
-		Region:     "Nairobi",
-		DueDate:    &dueDate,
+		ID:        "task_billing_1",
+		TenantID:  "tenant_safari",
+		Title:     "FTTB Fiber Install",
+		CreatedBy: "usr_safari_admin",
+		Status:    "In_Progress",
+		Region:    "Nairobi",
+		DueDate:   &dueDate,
 	}
 	database.SaveTask(task)
 

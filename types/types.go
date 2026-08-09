@@ -137,6 +137,36 @@ type Invoice struct {
 }
 
 // Invoice Payment
+type BusinessLedgerEntry struct {
+	ID            string    `json:"id"`
+	TenantID      string    `json:"tenant_id"`
+	TransactionID string    `json:"transaction_id"`
+	TaskID        string    `json:"task_id,omitempty"`
+	InvoiceID     string    `json:"invoice_id,omitempty"`
+	EntityType    string    `json:"entity_type"`
+	EntityID      string    `json:"entity_id"`
+	Account       string    `json:"account"`
+	EntryType     string    `json:"entry_type"`
+	Amount        float64   `json:"amount"`
+	Quantity      float64   `json:"quantity"`
+	UnitCost      float64   `json:"unit_cost"`
+	Currency      string    `json:"currency"`
+	Reference     string    `json:"reference,omitempty"`
+	ActorID       string    `json:"actor_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	ReversalOf    string    `json:"reversal_of,omitempty"`
+}
+
+type ProfitabilitySummary struct {
+	TaskID       string  `json:"task_id"`
+	TaskTitle    string  `json:"task_title"`
+	Revenue      float64 `json:"revenue"`
+	MaterialCost float64 `json:"material_cost"`
+	LaborCost    float64 `json:"labor_cost"`
+	GrossMargin  float64 `json:"gross_margin"`
+	MarginPct    float64 `json:"margin_pct"`
+}
+
 type Payment struct {
 	ID            string    `json:"id"`
 	TenantID      string    `json:"tenant_id"`
@@ -158,6 +188,8 @@ type Task struct {
 	Region     string     `json:"region"`
 	DueDate    *time.Time `json:"due_date,omitempty"`
 	DependsOn  string     `json:"depends_on,omitempty"`
+	CustomerID string     `json:"customer_id,omitempty"`
+	ProjectID  string     `json:"project_id,omitempty"`
 }
 
 // Timesheet submission
@@ -215,12 +247,128 @@ type ResetPasswordCommand struct {
 }
 
 type SubmitMaterialRequestCommand struct {
-	TaskID   string `json:"task_id"`
-	ItemName string `json:"item_name"`
+	RequestID   string `json:"request_id,omitempty"`
+	TaskID      string `json:"task_id"`
+	ItemName    string `json:"item_name"`
+	RequesterID string `json:"requester_id,omitempty"`
 }
 
 type ApproveMaterialCommand struct {
 	RequestID string `json:"request_id"`
+}
+
+// FulfillMaterialRequestCommand is released only after the governance workflow
+// reaches EXECUTED. The consumer performs the inventory/procurement transaction
+// atomically and idempotently.
+type FulfillMaterialRequestCommand struct {
+	RequestID   string `json:"request_id"`
+	TaskID      string `json:"task_id"`
+	ItemName    string `json:"item_name"`
+	RequesterID string `json:"requester_id"`
+}
+
+// Customer/Project lifecycle models unify CRM, commercial, delivery and CX.
+type Lead struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	Name      string    `json:"name"`
+	Phone     string    `json:"phone"`
+	Email     string    `json:"email"`
+	Source    string    `json:"source"`
+	Status    string    `json:"status"`
+	OwnerID   string    `json:"owner_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Quote struct {
+	ID         string     `json:"id"`
+	TenantID   string     `json:"tenant_id"`
+	CustomerID string     `json:"customer_id"`
+	LeadID     string     `json:"lead_id,omitempty"`
+	Title      string     `json:"title"`
+	Amount     float64    `json:"amount"`
+	Status     string     `json:"status"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+	CreatedBy  string     `json:"created_by"`
+	ApprovedBy string     `json:"approved_by,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+type Project struct {
+	ID         string     `json:"id"`
+	TenantID   string     `json:"tenant_id"`
+	CustomerID string     `json:"customer_id"`
+	QuoteID    string     `json:"quote_id,omitempty"`
+	Name       string     `json:"name"`
+	Status     string     `json:"status"`
+	Region     string     `json:"region"`
+	StartDate  *time.Time `json:"start_date,omitempty"`
+	TargetDate *time.Time `json:"target_date,omitempty"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+type ProjectEvidence struct {
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	ProjectID    string    `json:"project_id"`
+	TaskID       string    `json:"task_id,omitempty"`
+	EvidenceType string    `json:"evidence_type"`
+	URL          string    `json:"url"`
+	Note         string    `json:"note,omitempty"`
+	CapturedBy   string    `json:"captured_by"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type CustomerSatisfaction struct {
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	CustomerID string    `json:"customer_id"`
+	ProjectID  string    `json:"project_id,omitempty"`
+	Rating     int       `json:"rating"`
+	Comment    string    `json:"comment,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type CreateLeadPayload struct {
+	Name   string `json:"name"`
+	Phone  string `json:"phone"`
+	Email  string `json:"email"`
+	Source string `json:"source"`
+}
+type CreateQuotePayload struct {
+	ID         string     `json:"id"`
+	CustomerID string     `json:"customer_id"`
+	LeadID     string     `json:"lead_id"`
+	Title      string     `json:"title"`
+	Amount     float64    `json:"amount"`
+	ValidUntil *time.Time `json:"valid_until"`
+}
+type CreateProjectPayload struct {
+	ID         string     `json:"id"`
+	CustomerID string     `json:"customer_id"`
+	QuoteID    string     `json:"quote_id"`
+	Name       string     `json:"name"`
+	Region     string     `json:"region"`
+	StartDate  *time.Time `json:"start_date"`
+	TargetDate *time.Time `json:"target_date"`
+}
+type CreateEvidencePayload struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id"`
+	EvidenceType string `json:"evidence_type"`
+	URL          string `json:"url"`
+	Note         string `json:"note"`
+}
+type CreateSatisfactionPayload struct {
+	CustomerID string `json:"customer_id"`
+	ProjectID  string `json:"project_id"`
+	Comment    string `json:"comment"`
+	Rating     int    `json:"rating"`
+}
+
+type ApproveQuoteCommand struct {
+	QuoteID string `json:"quote_id"`
 }
 
 type CreateCustomerCommand struct {
@@ -284,4 +432,28 @@ type ConvertTicketToTaskCommand struct {
 	Title      string `json:"title"`
 	AssignedTo string `json:"assigned_to"`
 	DependsOn  string `json:"depends_on,omitempty"`
+}
+
+// Workflow approval instance — immutable governance record for maker-checker execution.
+type WorkflowInstance struct {
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	EntityType   string    `json:"entity_type"`
+	EntityID     string    `json:"entity_id"`
+	WorkflowKey  string    `json:"workflow_key"`
+	Step         int       `json:"step"`
+	Status       string    `json:"status"`
+	RequestedBy  string    `json:"requested_by"`
+	CheckedBy    string    `json:"checked_by,omitempty"`
+	ExecutedBy   string    `json:"executed_by,omitempty"`
+	ReconciledBy string    `json:"reconciled_by,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type WorkflowDecision struct {
+	InstanceID string `json:"instance_id"`
+	Action     string `json:"action"` // approve, reject, return, execute, reconcile
+	Reason     string `json:"reason,omitempty"`
 }

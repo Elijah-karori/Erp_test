@@ -18,6 +18,7 @@ import (
 	"erp-event-bus/handler"
 	"erp-event-bus/internal/env"
 	"erp-event-bus/internal/eventbus"
+	"erp-event-bus/internal/outbox"
 	"erp-event-bus/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -70,9 +71,14 @@ func main() {
 	database := db.NewDatabase(pool)
 	sqliteDB.Pool = pool
 
-	// 5. Initialize downstream JetStream Consumer in background
+	// 5. Initialize durable outbox publisher and downstream JetStream consumers.
+	// Workflow execution commits the outbox row in the same PostgreSQL transaction;
+	// this publisher is responsible only for delivery and retry.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	outboxPublisher := outbox.NewPublisher(pool, js)
+	go outboxPublisher.Run(ctx)
 
 	_ = consumer.StartERPProcessors(ctx, nc, database, sqliteDB, emailSvc)
 
@@ -102,6 +108,12 @@ func main() {
 
 	// State and live log endpoints for UI rendering
 	api.GET("/state", uiHandler.GetState)
+	api.GET("/lifecycle", uiHandler.GetCustomerLifecycle, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
+	api.GET("/execution", uiHandler.GetProjectExecution, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
+	api.GET("/intelligence", uiHandler.GetFieldServiceIntelligence, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
+	api.GET("/field/telemetry", uiHandler.GetFieldTelemetry, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
+	api.POST("/field/attendance", uiHandler.RecordFieldAttendance, middleware.ModuleClearanceMiddleware(database, "timesheets:submit"))
+	api.POST("/field/job-event", uiHandler.RecordFieldJobEvent, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
 	api.GET("/logs", uiHandler.GetLogs)
 	api.POST("/rbac/update", uiHandler.UpdateRBAC, middleware.ModuleClearanceMiddleware(database, "users:*"))
 	api.POST("/tenants", uiHandler.CreateTenant, middleware.ModuleClearanceMiddleware(database, "users:*"))
@@ -132,11 +144,31 @@ func main() {
 
 	// Tasks Endpoints:
 	api.POST("/tasks", h.CreateTaskHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.GET("/workflows", h.ListWorkflowInstancesHandler, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
+	api.GET("/ledger", h.LedgerHandler, middleware.ModuleClearanceMiddleware(database, "finance:read"))
+	api.GET("/profitability", h.ProfitabilityHandler, middleware.ModuleClearanceMiddleware(database, "finance:read"))
+	api.POST("/ledger/reverse", h.ReverseLedgerHandler, middleware.ModuleClearanceMiddleware(database, "finance:write"))
+	api.POST("/workflows", h.CreateWorkflowInstanceHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/workflows/decision", h.WorkflowDecisionHandler, middleware.AnyModuleClearanceMiddleware(database, "tasks:approve", "timesheets:approve", "inventory:write", "finance:write"))
 	api.POST("/tasks/status", h.UpdateTaskStatusHandler, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
 	api.POST("/tasks/timesheets/approve", h.ApproveTimesheetHandler, middleware.ModuleClearanceMiddleware(database, "timesheets:approve"))
 	api.POST("/tasks/materials/request", h.SubmitMaterialRequestHandler, middleware.ModuleClearanceMiddleware(database, "tasks:read"))
 	api.POST("/tasks/materials/approve", h.ApproveMaterialHandler, middleware.ModuleClearanceMiddleware(database, "tasks:approve"))
 	api.POST("/customers", h.CreateCustomerHandler, middleware.ModuleClearanceMiddleware(database, "users:*"))
+	api.POST("/lifecycle/leads", h.CreateLeadHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.POST("/lifecycle/leads/convert", h.ConvertLeadHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.POST("/lifecycle/quotes", h.CreateQuoteHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.POST("/lifecycle/quotes/submit", h.SubmitQuoteApprovalHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.POST("/lifecycle/quotes/approve", h.ApproveQuoteHandler, middleware.ModuleClearanceMiddleware(database, "tasks:approve"))
+	api.POST("/lifecycle/projects", h.CreateProjectHandler, middleware.ModuleClearanceMiddleware(database, "tasks:create"))
+	api.POST("/lifecycle/projects/task", h.LinkProjectTaskHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/lifecycle/evidence", h.AddProjectEvidenceHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/lifecycle/satisfaction", h.AddCustomerSatisfactionHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/execution/assign", h.CreateProjectAssignmentHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/execution/schedule", h.CreateProjectScheduleHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/execution/bom", h.CreateProjectBOMHandler, middleware.ModuleClearanceMiddleware(database, "inventory:write"))
+	api.POST("/execution/complete/submit", h.SubmitCompletionReviewHandler, middleware.ModuleClearanceMiddleware(database, "tasks:write"))
+	api.POST("/execution/complete/review", h.ReviewCompletionHandler, middleware.ModuleClearanceMiddleware(database, "tasks:approve"))
 	api.POST("/users/reset-password", h.ResetPasswordHandler, middleware.ModuleClearanceMiddleware(database, "users:*"))
 
 	// 7. Start server gracefully
